@@ -326,12 +326,16 @@ export class Agent {
 
       // If no tool calls were requested, the assistant is done
       if (completion.toolCalls.length === 0) {
-        // A stream that carried nothing renders as an empty turn, which reads as the app ignoring
-        // the prompt. Say so instead, since the cause is the server or the template, not the input.
-        const saidNothing =
-          !(completion.content ?? '').trim() && !(completion.reasoningContent ?? '').trim();
-        if (saidNothing) {
-          const notice = `${this.activeModel?.name || this.client.model} returned an empty response. The prompt may exceed what the server was launched with, or the chat template may have rejected the conversation.`;
+        // A turn that ends without an answer renders as nothing, which reads as the app freezing.
+        // Reasoning does not count: it is shown collapsed as "thought for N words", so a model that
+        // thinks and then writes no content leaves the user with a blank screen either way.
+        const answered = (completion.content ?? '').trim().length > 0;
+        if (!answered) {
+          const model = this.activeModel?.name || this.client.model;
+          const thoughtOnly = (completion.reasoningContent ?? '').trim().length > 0;
+          const notice = thoughtOnly
+            ? `${model} finished thinking but wrote no answer. Reasoning models sometimes end the turn inside the thinking block; ask again, or switch with /mode instruct.`
+            : `${model} returned an empty response. The prompt may exceed what the server was launched with, or the chat template may have rejected the conversation.`;
           if (callbacks.onNotice) {
             callbacks.onNotice(notice);
           } else if (isOneShotStream) {

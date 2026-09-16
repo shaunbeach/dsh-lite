@@ -426,6 +426,27 @@ test('A stalled stream ends with a diagnosis instead of hanging', async () => {
   assert.ok(Date.now() - started < 5000, 'gave up promptly rather than waiting out the request timeout');
 });
 
+test('A turn that thinks but writes no answer is reported', async () => {
+  // The real case: the model reasoned its way to an answer, then emitted zero content tokens.
+  // The UI collapses reasoning to "thought for N words", so the screen looks frozen.
+  const client = new DeepSeekClient();
+  client.streamChat = async () => ({
+    content: '',
+    reasoningContent: 'The featured article is George Krugers, a Dutch East Indies filmmaker.',
+    toolCalls: [],
+  });
+
+  const agent = new Agent({ client });
+  agent.sessionStore.appendMessage = async () => {};
+
+  const notices: string[] = [];
+  await agent.runTurn("what is today's featured article?", { onNotice: (m) => notices.push(m) });
+
+  assert.strictEqual(notices.length, 1, 'thinking with no answer must not render as silence');
+  assert.match(notices[0], /finished thinking but wrote no answer/);
+  assert.match(notices[0], /\/mode instruct/, 'the notice should say what to try');
+});
+
 test('An empty model response is reported rather than shown as nothing', async () => {
   const client = new DeepSeekClient();
   client.streamChat = async () => ({ content: '', reasoningContent: '', toolCalls: [] });
