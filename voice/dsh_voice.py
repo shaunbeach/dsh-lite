@@ -348,7 +348,13 @@ class Listener:
             device=self.config.input_device,
             callback=self._on_audio,
         ):
-            log(f'{self.config.name} is listening for "{self.config.wake_word}"')
+            spoken_wake = Path(self.config.wake_word).stem.replace("_", " ").split(" v0")[0]
+            log(f'{self.config.name} is listening. Say "{spoken_wake}" to wake her.')
+            if self.config.name.lower() not in spoken_wake.lower():
+                # The name and the trigger are different things, and seeing them side by side
+                # without explanation reads as a bug rather than a limitation.
+                log(f'  (the wake phrase is a trained model, and there is not one for '
+                    f'"{self.config.name}" yet — voice/README.md has how to make one)')
             speaking = False
             while True:
                 frame = self.frames.get()
