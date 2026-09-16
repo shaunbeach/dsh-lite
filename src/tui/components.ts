@@ -238,6 +238,11 @@ export class BannerView implements Component {
     this.cached = undefined;
   }
 
+  public setCwd(cwd: string) {
+    this.options.cwd = cwd;
+    this.cached = undefined;
+  }
+
   invalidate(): void {
     this.cached = undefined;
   }

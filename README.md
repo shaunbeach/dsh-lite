@@ -42,6 +42,8 @@ Zero Electron, zero React, zero browser dependencies. Instant startup (<40ms).
 - **Interactive Slash Commands**:
   - `/agent`, `/plan`, `/chat`: Switch interaction mode. Agent has every tool; plan has the
     read-only ones; chat has web search and fetch, but nothing that touches the workspace.
+  - `/cd <path>`: Move the workspace tools work in, without restarting the model or server. The
+    conversation and its transcript follow you to the new directory.
   - `/model [name]`: Switch between local GGUFs (restarts or reuses `llama-server`) or cloud DeepSeek.
   - `/mode [thinking|instruct]`: Toggle sampling mode, including the model's thinking switch.
   - `/serve`: Host the selected model for other machines, with live server logs.

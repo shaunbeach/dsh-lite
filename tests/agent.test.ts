@@ -7,6 +7,7 @@ import { Agent, CANCELLED_TOOL_RESULT, type AgentTurnCallbacks } from '../src/ag
 import { DeepSeekClient } from '../src/llm/client.js';
 import type { ChatMessage } from '../src/llm/types.js';
 import { estimateMessageTokens, estimateTokens } from '../src/context.js';
+import * as fsSync from 'node:fs';
 
 test('Agent turn callbacks receive tool events without stdout writes', async (t) => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-agent-test-'));
@@ -526,4 +527,67 @@ test('/clear starts an empty conversation, not just an empty screen', async (t) 
     assert.strictEqual(keeper.messages[0].role, 'system');
     assert.match(keeper.messages[0].content!, /planning assistant/i);
   });
+});
+
+test('/cd moves the workspace without restarting anything', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-cd-'));
+  const projectA = path.join(root, 'project-a');
+  const projectB = path.join(root, 'project-b');
+  await fs.mkdir(projectA);
+  await fs.mkdir(projectB);
+  await fs.writeFile(path.join(projectB, 'only-in-b.txt'), 'found me\n');
+
+  const client = new DeepSeekClient();
+  client.streamChat = async () => ({ content: 'ok', reasoningContent: '', toolCalls: [] });
+  const agent = new Agent({ client, cwd: projectA });
+  await agent.runTurn('first question in A', {});
+
+  const moved = await agent.setCwd(projectB);
+
+  await t.test('tools resolve against the new directory', async () => {
+    assert.strictEqual(moved, projectB);
+    const listing = await agent.registry.execute('list_dir', '{}', 'c1', { cwd: agent.cwd });
+    assert.match(listing.result, /only-in-b\.txt/);
+  });
+
+  await t.test('the system prompt names the new directory', () => {
+    assert.strictEqual(agent.messages[0].role, 'system');
+    assert.match(agent.messages[0].content!, new RegExp(projectB.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(agent.messages[0].content!, new RegExp(`${projectA.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`));
+  });
+
+  await t.test('the conversation is kept', () => {
+    assert.ok(agent.messages.some((m) => m.content === 'first question in A'));
+  });
+
+  await t.test('the session log follows, so it matches what the model is sent', async () => {
+    const logged = await agent.sessionStore.loadSession(agent.sessionId);
+    assert.ok(
+      logged.some((m) => m.content === 'first question in A'),
+      'a log missing the earlier turns would disagree with the request'
+    );
+    const storedUnder = path.join(projectB, '.dsh', 'sessions', `${agent.sessionId}.jsonl`);
+    assert.ok(fsSync.existsSync(storedUnder), 'the transcript should live under the new workspace');
+  });
+
+  await t.test('a later turn appends to the new log', async () => {
+    await agent.runTurn('second question in B', {});
+    const logged = await agent.sessionStore.loadSession(agent.sessionId);
+    assert.ok(logged.some((m) => m.content === 'second question in B'));
+    assert.ok(logged.some((m) => m.content === 'first question in A'), 'both halves in one log');
+  });
+
+  await t.test('a missing or non-directory target is refused', async () => {
+    await assert.rejects(agent.setCwd(path.join(root, 'nope')), /No such directory/);
+    await assert.rejects(agent.setCwd(path.join(projectB, 'only-in-b.txt')), /Not a directory/);
+    assert.strictEqual(agent.cwd, projectB, 'a failed move must not change the workspace');
+  });
+
+  await t.test('~ and relative paths resolve', async () => {
+    await agent.setCwd('../project-a');
+    assert.strictEqual(agent.cwd, projectA, 'relative to the current workspace');
+    assert.strictEqual(await agent.setCwd('~'), os.homedir());
+  });
+
+  await fs.rm(root, { recursive: true, force: true });
 });

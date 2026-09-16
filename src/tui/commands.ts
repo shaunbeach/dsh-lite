@@ -1,6 +1,7 @@
 import type { LiteModel } from '../config/models.js';
 
 export type CommandName =
+  | 'cd'
   | 'model'
   | 'mode'
   | 'agent'
@@ -23,6 +24,7 @@ export const COMMANDS: readonly { name: CommandName; description: string; argume
   { name: 'agent', description: 'Switch to agent mode (autonomous coding with all tools)' },
   { name: 'plan', description: 'Switch to plan mode (design & implementation planning, read-only tools)' },
   { name: 'chat', description: 'Switch to chat mode (conversation plus web search, no file or shell tools)' },
+  { name: 'cd', description: 'Change the workspace directory tools work in', argumentHint: '<path>' },
   { name: 'model', description: 'Switch model (picker lists local models)', argumentHint: '[name]' },
   { name: 'mode', description: 'Switch between thinking and instruct sampling', argumentHint: '[thinking|instruct]' },
   { name: 'serve', description: 'Serve a model as a remote host with live server logs' },

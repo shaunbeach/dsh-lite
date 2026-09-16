@@ -399,6 +399,10 @@ export class InteractiveApp {
 
   private runCommand(name: CommandName, args: string) {
     switch (name) {
+      case 'cd':
+        void this.changeDirectory(args);
+        break;
+
       case 'model':
         if (args) void this.switchModel(args);
         else this.pickModel();
@@ -449,6 +453,36 @@ export class InteractiveApp {
         this.tui.stop();
         this.finishPromiseResolve();
         break;
+    }
+  }
+
+  /**
+   * Points the workspace at another directory. The model and llama-server stay as they are; only
+   * what the tools resolve paths against changes, along with everything on screen that names it.
+   */
+  private async changeDirectory(target: string) {
+    if (this.isBusy || this.isServing || this.isSwitchingModel) {
+      this.setStatus('Busy — wait for the current operation to finish.');
+      return;
+    }
+    if (!target) {
+      this.setStatus(`Usage: /cd <path>   (currently ${this.agent.cwd})`);
+      return;
+    }
+
+    try {
+      const moved = await this.agent.setCwd(target);
+      this.bannerView.setCwd(moved);
+      // File completion is rooted at the workspace, so it has to be rebuilt for the new one.
+      this.editor.setAutocompleteProvider(
+        new CombinedAutocompleteProvider(slashCommands(this.modelsConfig?.models ?? []) as any, moved)
+      );
+      this.chat.addChild(new NoticeView(`Workspace is now ${moved}`));
+      this.setStatus(undefined);
+      this.updateFooter();
+      this.tui.requestRender();
+    } catch (err: any) {
+      this.setStatus(`Could not change directory: ${err.message}`);
     }
   }
 

@@ -8,7 +8,10 @@ import { renderDiff } from './ui/diff.js';
 import { format } from './ui/format.js';
 import { buildSystemPrompt, type InteractionMode } from './prompt.js';
 import { ContextManager, estimateTokens } from './context.js';
+import { resolveHomePath } from './config/models.js';
 import type { LiteModel } from './config/models.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 export type { InteractionMode } from './prompt.js';
 
@@ -123,6 +126,39 @@ export class Agent {
     });
     this.contextManager.contextWindow = model.contextWindow;
     this.contextManager.maxTokens = model.maxTokens;
+  }
+
+  /**
+   * Moves the workspace that tools resolve paths against, without restarting anything.
+   *
+   * The conversation follows: it is copied into a session under the new workspace, because the
+   * session log has to hold what the model is being sent. Leaving the old log behind would make the
+   * two disagree the moment the next message landed.
+   *
+   * Returns the resolved absolute path.
+   */
+  public async setCwd(target: string): Promise<string> {
+    const resolved = path.resolve(this.cwd, resolveHomePath(target.trim()));
+
+    let stats: fs.Stats;
+    try {
+      stats = fs.statSync(resolved);
+    } catch {
+      throw new Error(`No such directory: ${resolved}`);
+    }
+    if (!stats.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
+
+    if (resolved === this.cwd) return resolved;
+
+    const carried = this.messages.filter(m => m.role !== 'system');
+    this.cwd = resolved;
+    this.sessionStore = new SessionStore(resolved);
+    this.sessionId = this.sessionStore.createSessionId();
+    // The system prompt states the working directory, so it has to be rebuilt for the new one.
+    this.initSystemPrompt();
+    for (const message of carried) await this.sessionStore.appendMessage(this.sessionId, message);
+
+    return resolved;
   }
 
   public isModelLoaded(): boolean {
