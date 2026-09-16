@@ -46,17 +46,23 @@ Then it is just `dsh-voice`. Options are passed straight through, for example `d
 Say the wake word, then your instruction. The words land in the dsh input line **without being
 submitted**, so a misheard one can be seen and corrected first.
 
-To send it, either press Enter, or just keep talking — after dictation the microphone stays live for
-eight seconds, so **"go"** or **"send it"** needs no second wake word:
+To send it, press Enter, or say **"go"** or **"send it"**. Either of two ways works:
 
-> "Hey Amy, write me a template for a project readme and save it as notes.md"
-> *(the line fills in)*
+> "Hey Amy, check the weather in Paris. Go."
+
+said in one breath, or as two:
+
+> "Hey Amy, check the weather in Paris"
+> *(the line fills in, and you can read it)*
 > "go"
 
-**"stop"** aborts a running turn, and is the Escape key. Control phrases only count when they are the
-whole utterance: *"go ahead and write the file"* is dictated, not read as a request to send. The
-follow-up window closes after a send or a stop, so the wake word is needed again for the next
-instruction; `--follow-up-ms 0` turns it off entirely.
+After dictation the microphone stays live for eight seconds, so the second form needs no further
+wake word. **"stop"** aborts a running turn, and is the Escape key.
+
+A control phrase counts when it is the whole utterance, or the final sentence of one. That is what
+keeps *"go ahead and write the file"* and *"tell me where to go"* as dictation — Whisper punctuates,
+and the sentence break is the only signal for where the instruction stopped. The follow-up window
+closes after a send or a stop; `--follow-up-ms 0` turns it off.
 
 ## Memory
 

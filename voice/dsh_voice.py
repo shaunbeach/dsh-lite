@@ -39,6 +39,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Whisper weights come from a local cache; the download bars for it are noise in a voice log.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
 import numpy as np
 
 SAMPLE_RATE = 16_000
@@ -369,6 +372,18 @@ class Listener:
 
         while True:
             frame = self.frames.get()
+
+            # The acknowledgement is still coming out of the speakers when the follow-up window
+            # opens, and a microphone hears it. Recording through it puts "Got it" into the
+            # instruction, so wait it out and start the utterance from scratch afterwards.
+            if self.speaker.is_speaking:
+                self.endpointer.reset()
+                collected.clear()
+                carry = np.zeros(0, dtype=np.int16)
+                started = False
+                speech_ms = silence_ms = waited_ms = 0
+                continue
+
             collected.append(frame)
             frame_ms = len(frame) * 1000 // SAMPLE_RATE
 
@@ -403,20 +418,47 @@ class Listener:
         return Utterance(audio=audio, seconds=len(audio) / SAMPLE_RATE)
 
 
-def classify(text: str) -> tuple[str, str]:
+@dataclass
+class Intent:
+    """What to do with an utterance: type it, act on it, or type it and then act."""
+
+    action: str
+    text: str = ""
+    then: str | None = None
+
+
+def _normalise(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", text)).strip().lower()
+
+
+def classify(text: str) -> Intent:
     """
     Decides what an utterance is.
 
-    Control phrases only count when they are the whole utterance: "go ahead and write the file" is an
-    instruction, and treating the "go ahead" in it as a command to send would be worse than useless.
+    A control phrase counts when it is the whole utterance, or when it is the final sentence of one:
+    "check the weather in Paris. Go." is how the instruction and the send actually get said, in one
+    breath with no pause between them for the endpointer to cut on.
+
+    Requiring a sentence of its own is what keeps "tell me where to go" and "go ahead and write the
+    file" as dictation. Whisper punctuates, and that punctuation is the only signal available for
+    where the instruction stopped.
     """
-    normalised = re.sub(r"[^\w\s]", "", text).strip().lower()
-    normalised = re.sub(r"\s+", " ", normalised)
-    if normalised in ABORT_PHRASES:
-        return "abort", text
-    if normalised in SUBMIT_PHRASES:
-        return "submit", text
-    return "text", text
+    whole = _normalise(text)
+    if whole in ABORT_PHRASES:
+        return Intent("abort")
+    if whole in SUBMIT_PHRASES:
+        return Intent("submit")
+
+    sentences = re.findall(r"[^.!?]+[.!?]*", text)
+    if len(sentences) >= 2:
+        last = _normalise(sentences[-1])
+        body = "".join(sentences[:-1]).strip()
+        if body and last in SUBMIT_PHRASES:
+            return Intent("text", body, "submit")
+        if body and last in ABORT_PHRASES:
+            return Intent("text", body, "abort")
+
+    return Intent("text", text.strip())
 
 
 def resolve_model_dir() -> Path:
@@ -503,16 +545,24 @@ def main(argv: list[str]) -> int:
             log("nothing transcribed")
             return "empty"
 
-        kind, spoken = classify(text)
-        log(f"{kind}: {spoken}")
+        intent = classify(text)
+        log(f"{intent.action}{'+' + intent.then if intent.then else ''}: {intent.text or text}")
 
-        if kind == "abort":
+        if intent.action == "abort":
             harness.send({"type": "abort"})
-        elif kind == "submit":
+            return "abort"
+        if intent.action == "submit":
             harness.send({"type": "submit"})
-        else:
-            harness.send({"type": "text", "text": spoken})
-        return kind
+            return "submit"
+
+        harness.send({"type": "text", "text": intent.text})
+        if intent.then == "submit":
+            harness.send({"type": "submit"})
+            return "submit"
+        if intent.then == "abort":
+            harness.send({"type": "abort"})
+            return "abort"
+        return "text"
 
     try:
         listener.run(handle)
