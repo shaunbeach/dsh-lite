@@ -7,6 +7,7 @@ export type CommandName =
   | 'agent'
   | 'plan'
   | 'chat'
+  | 'voice'
   | 'serve'
   | 'disconnect'
   | 'clear'
@@ -24,6 +25,7 @@ export const COMMANDS: readonly { name: CommandName; description: string; argume
   { name: 'agent', description: 'Switch to agent mode (autonomous coding with all tools)' },
   { name: 'plan', description: 'Switch to plan mode (design & implementation planning, read-only tools)' },
   { name: 'chat', description: 'Switch to chat mode (conversation plus web search, no file or shell tools)' },
+  { name: 'voice', description: 'Switch to voice mode and open the voice socket (no shell, cannot overwrite files)' },
   { name: 'cd', description: 'Change the workspace directory tools work in', argumentHint: '<path>' },
   { name: 'model', description: 'Switch model (picker lists local models)', argumentHint: '[name]' },
   { name: 'mode', description: 'Switch between thinking and instruct sampling', argumentHint: '[thinking|instruct]' },

@@ -76,6 +76,10 @@ export function resolveMaxSteps(option: number | undefined, envValue?: string): 
 const TOOLS_BY_MODE: Record<Exclude<InteractionMode, 'agent'>, readonly string[]> = {
   plan: ['view_file', 'list_dir', 'grep_search', 'web_search', 'web_fetch'],
   chat: ['web_search', 'web_fetch'],
+  // Voice deliberately has no bash: a shell cannot be made non-destructive by filtering commands,
+  // and a misheard instruction should not be able to delete anything. write_file is restricted to
+  // new files for the same reason, which leaves edit_file as the only way to change existing ones.
+  voice: ['view_file', 'list_dir', 'grep_search', 'web_search', 'web_fetch', 'write_file', 'edit_file'],
 };
 
 /** Stands in for a tool result the user aborted before the tool could run. */
@@ -422,6 +426,7 @@ export class Agent {
             cwd: this.cwd,
             abortSignal,
             outputLimitBytes: toolOutputLimitBytes(this.contextManager.contextWindow),
+            preventOverwrite: this.interactionMode === 'voice',
           }
         );
 

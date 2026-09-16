@@ -6,6 +6,8 @@ export interface ToolExecutionContext {
   abortSignal?: AbortSignal;
   /** Bytes of this tool's output that may reach the model, scaled to the model's context window. */
   outputLimitBytes?: number;
+  /** Refuse writes that would replace an existing file, so no content can be lost. */
+  preventOverwrite?: boolean;
 }
 
 export interface ToolDefinition<TArgs = any, TResult = any> {

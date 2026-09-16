@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import * as path from 'node:path';
 import type { ToolDefinition } from './types.js';
@@ -125,6 +125,9 @@ export const writeFileTool: ToolDefinition<WriteFileArgs, string> = {
   execute: async ({ path: filePath, content }, context) => {
     const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(context.cwd, filePath);
     try {
+      if (context.preventOverwrite && existsSync(fullPath)) {
+        return `Refused: ${filePath} already exists and this mode cannot replace a file. Use edit_file to change it, or switch to /agent.`;
+      }
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
       await fs.writeFile(fullPath, content, 'utf8');
       return `Successfully wrote ${Buffer.byteLength(content, 'utf8')} bytes to ${filePath}`;

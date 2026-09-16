@@ -593,7 +593,9 @@ test('Sampling follows the active model and mode', async (t) => {
     return sent;
   };
 
-  const cfg = loadModelsConfig();
+  // The checked-in example, not discovery: a personal models.yml is edited as models come and go,
+  // and a test that keys off it fails for reasons that have nothing to do with sampling.
+  const cfg = loadModelsConfig(path.join(process.cwd(), 'models.example.yml'));
   const named = (name: string) => cfg?.models.find((m) => m.name === name);
 
   await t.test('switching to a model without a sampling block clears the previous one', () => {
@@ -675,7 +677,7 @@ test('Sampling follows the active model and mode', async (t) => {
   });
 
   await t.test("a model's reasoning_effort merges with the thinking switch", async () => {
-    const xhigh = named('Qwen3.8-27B-IQ3_XXS-xhigh');
+    const xhigh = named('Qwen3.8-27B-xhigh');
     assert.ok(xhigh, 'fixture model changed');
 
     const agent = new Agent({ client: new DeepSeekClient() });

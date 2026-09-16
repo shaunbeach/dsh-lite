@@ -40,8 +40,10 @@ Zero Electron, zero React, zero browser dependencies. Instant startup (<40ms).
   - Stores conversations under `.dsh/sessions/` with `--resume` and `/resume <id>` support.
   - Writes a `.gitignore` in `.dsh/` so transcripts never appear as untracked files in your repository.
 - **Interactive Slash Commands**:
-  - `/agent`, `/plan`, `/chat`: Switch interaction mode. Agent has every tool; plan has the
-    read-only ones; chat has web search and fetch, but nothing that touches the workspace.
+  - `/agent`, `/plan`, `/chat`, `/voice`: Switch interaction mode. Agent has every tool; plan has
+    the read-only ones; chat has web search and fetch, but nothing that touches the workspace;
+    voice can read, search, write new files and edit existing ones, but has no shell.
+  - `/voice`: Switch to voice mode and open the voice socket. See **Voice control** below.
   - `/cd <path>`: Move the workspace tools work in, without restarting the model or server. The
     conversation and its transcript follow you to the new directory.
   - `/model [name]`: Switch between local GGUFs (restarts or reuses `llama-server`) or cloud DeepSeek.
@@ -114,6 +116,42 @@ providers:
 ```
 
 ---
+
+## Voice control
+
+`/voice` opens a unix domain socket at `~/.dsh/input.sock` (owner-only, `0600`) and switches to a
+mode with no shell, where `write_file` refuses to replace an existing file. A shell cannot be made
+non-destructive by filtering commands, so voice mode simply has none; `edit_file` is the only way to
+change a file that already exists.
+
+The socket speaks newline-delimited JSON, so a separate daemon owns the microphone, wake word,
+endpointing and transcription, and the harness only ever sees text.
+
+Sent to dsh:
+
+| Line | Effect |
+| --- | --- |
+| `{"type":"text","text":"..."}` | Appends to the input line. Does **not** submit, so a misheard word can be seen first. |
+| `{"type":"submit"}` | Submits the input line, as if Enter were pressed. |
+| `{"type":"abort"}` | Aborts a running turn, or clears the pending line. The Escape key. |
+
+Sent back, for the daemon to speak:
+
+| Line | When |
+| --- | --- |
+| `{"type":"ack"}` | A turn started. |
+| `{"type":"done","summary":"..."}` | A turn finished, condensed to one or two sentences. |
+| `{"type":"error","message":"..."}` | A line could not be understood. The connection stays up. |
+
+Drive it without a daemon:
+
+```sh
+printf '{"type":"text","text":"write a haiku about llamas"}\n{"type":"submit"}\n' \
+  | nc -U ~/.dsh/input.sock
+```
+
+Leaving voice mode closes the socket and removes the file, so only the window you asked for voice in
+is driven by it. A second dsh entering voice mode while another holds the socket is refused.
 
 ## Environment variables
 

@@ -8,7 +8,7 @@ import {
   SelectList,
   TuiMainScreen,
 } from '@earendil-works/pi-tui';
-import { Agent, type AgentTurnCallbacks } from '../agent.js';
+import { Agent, type AgentTurnCallbacks, type InteractionMode } from '../agent.js';
 import { estimateMessageTokens } from '../context.js';
 import { getLocalIpAddress, LlamaServerManager, serverPort, stopServerOnExit } from '../llm/server.js';
 import type { LiteModel, ModelsConfig } from '../config/models.js';
@@ -26,6 +26,7 @@ import {
   UserView,
 } from './components.js';
 import { COMMANDS, type CommandName, parseCommand, slashCommands } from './commands.js';
+import { summariseForSpeech, VoiceSocket } from '../voice/socket.js';
 
 export interface InteractiveAppOptions {
   agent: Agent;
@@ -51,6 +52,7 @@ export class InteractiveApp {
   private isServing = false;
   private isSwitchingModel = false;
   private modelSwitchAbort?: AbortController;
+  private voiceSocket?: VoiceSocket;
   private aiStatus: AiStatus = 'idle';
   private turnTimer?: NodeJS.Timeout;
   private turnStarted?: number;
@@ -160,6 +162,7 @@ export class InteractiveApp {
 
     await donePromise;
     this.stopTurnTimer();
+    await this.closeVoiceSocket();
     await this.serverManager.stop();
   }
 
@@ -282,6 +285,8 @@ export class InteractiveApp {
     this.chat.addChild(new UserView(input));
     this.tui.requestRender();
 
+    this.voiceSocket?.broadcast({ type: 'ack' });
+
     const turnStarted = Date.now();
     this.turnStarted = turnStarted;
     this.aiStatus = this.agent.client.mode === 'thinking' ? 'thinking' : 'working';
@@ -394,6 +399,11 @@ export class InteractiveApp {
       this.updateFooter(turnDurationMs);
       this.setStatus(undefined);
       this.tui.requestRender();
+
+      if (this.voiceSocket?.isOpen) {
+        const reply = [...this.agent.messages].reverse().find(m => m.role === 'assistant' && m.content)?.content;
+        this.voiceSocket.broadcast({ type: 'done', summary: summariseForSpeech(reply ?? '') });
+      }
     }
   }
 
@@ -425,9 +435,8 @@ export class InteractiveApp {
       case 'agent':
       case 'plan':
       case 'chat':
-        this.agent.setInteractionMode(name);
-        this.chat.addChild(new NoticeView(`Switched to ${name} mode`));
-        this.updateFooter();
+      case 'voice':
+        void this.switchInteractionMode(name);
         break;
 
       case 'serve':
@@ -460,6 +469,75 @@ export class InteractiveApp {
    * Points the workspace at another directory. The model and llama-server stay as they are; only
    * what the tools resolve paths against changes, along with everything on screen that names it.
    */
+  /**
+   * Switches interaction mode, opening the voice socket on the way into voice mode and closing it on
+   * the way out. Tying the socket to the mode settles which window a daemon drives: the one where
+   * voice was asked for, rather than whichever happened to start last.
+   */
+  private async switchInteractionMode(mode: InteractionMode) {
+    const leavingVoice = this.agent.interactionMode === 'voice' && mode !== 'voice';
+    if (leavingVoice) await this.closeVoiceSocket();
+
+    this.agent.setInteractionMode(mode);
+
+    if (mode === 'voice' && !this.voiceSocket?.isOpen) {
+      const socket = new VoiceSocket();
+      try {
+        await socket.open({
+          onText: (text) => this.onVoiceText(text),
+          onSubmit: () => this.onVoiceSubmit(),
+          onAbort: () => this.onVoiceAbort(),
+        });
+        this.voiceSocket = socket;
+        this.chat.addChild(new NoticeView(`Voice mode. Listening on ${socket.address}`));
+      } catch (err: any) {
+        this.chat.addChild(new NoticeView(`Voice mode without a socket: ${err.message}`));
+      }
+    } else {
+      this.chat.addChild(new NoticeView(`Switched to ${mode} mode`));
+    }
+
+    this.updateFooter();
+    this.tui.requestRender();
+  }
+
+  private async closeVoiceSocket(): Promise<void> {
+    const socket = this.voiceSocket;
+    this.voiceSocket = undefined;
+    if (socket) await socket.close();
+  }
+
+  /** Dictated text lands in the editor rather than running, so a misheard word can be seen first. */
+  private onVoiceText(text: string): void {
+    const spoken = text.trim();
+    if (!spoken) return;
+    const existing = this.editor.getText();
+    this.editor.setText(existing ? `${existing} ${spoken}` : spoken);
+    this.tui.requestRender();
+  }
+
+  private onVoiceSubmit(): void {
+    const pending = this.editor.getText().trim();
+    if (!pending) return;
+    void this.submit(pending);
+  }
+
+  /** Barge-in. Mirrors Escape: stop a running turn, or clear what is waiting to be sent. */
+  private onVoiceAbort(): void {
+    if (this.isBusy) {
+      this.abortController?.abort();
+      this.setStatus('Aborting operation...');
+      return;
+    }
+    if (this.isSwitchingModel) {
+      this.modelSwitchAbort?.abort();
+      this.setStatus('Cancelling model load...');
+      return;
+    }
+    this.editor.setText('');
+    this.tui.requestRender();
+  }
+
   private async changeDirectory(target: string) {
     if (this.isBusy || this.isServing || this.isSwitchingModel) {
       this.setStatus('Busy — wait for the current operation to finish.');
