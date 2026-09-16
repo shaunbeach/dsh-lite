@@ -62,6 +62,45 @@ function describeExit(child: ChildProcess): string {
   return child.signalCode !== null ? `signal ${child.signalCode}` : `code ${child.exitCode}`;
 }
 
+/**
+ * Output that means the server will not serve, even though it goes on to report itself healthy.
+ * llama-server finishes starting after a failed warmup decode and answers /health with 200, so
+ * readiness alone cannot tell a working server from one whose backend is already dead.
+ *
+ * The "failed to fit params" warning is deliberately absent: it precedes plenty of loads that go on
+ * to work, and treating it as fatal would refuse servers that are merely tight on memory.
+ */
+const FATAL_SERVER_OUTPUT: readonly { pattern: RegExp; explain: string }[] = [
+  {
+    pattern: /kIOGPUCommandBufferCallbackErrorOutOfMemory|Insufficient Memory/i,
+    explain: 'the GPU ran out of memory. Lower --ctx-size or --ubatch-size for this model, or free memory on the machine',
+  },
+  {
+    pattern: /backend is in error state/i,
+    explain: 'its compute backend failed and cannot recover',
+  },
+  {
+    pattern: /failed to decode|failed to compute graph/i,
+    explain: 'it could not run a forward pass',
+  },
+  {
+    pattern: /error loading model|failed to load model|unable to load model/i,
+    explain: 'the model file could not be loaded',
+  },
+];
+
+/** The first fatal line in a chunk of server output, if any. */
+
+export function findFatalOutput(text: string): string | undefined {
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    for (const { pattern, explain } of FATAL_SERVER_OUTPUT) {
+      if (pattern.test(line)) return explain;
+    }
+  }
+  return undefined;
+}
+
 function samePath(a: string, b: string): boolean {
   try {
     return fs.realpathSync(a) === fs.realpathSync(b);
@@ -93,6 +132,8 @@ export class LlamaServerManager {
   private active?: LiteModel;
   private logOffset = 0;
   private queue: Promise<unknown> = Promise.resolve();
+  /** Why the server this manager spawned cannot serve, set from its own output. */
+  private fatalOutput?: string;
 
   constructor(options: LlamaServerManagerOptions = {}) {
     this.logFile = options.logFile || path.join(os.homedir(), '.dsh', 'logs', 'llama-server.log');
@@ -251,6 +292,7 @@ export class LlamaServerManager {
     onLogLine?: (line: string) => void
   ): ChildProcess {
     const args = buildServerArgs(model, isHost);
+    this.fatalOutput = undefined;
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true });
     const logStream = fs.createWriteStream(this.logFile, { flags: 'a' });
 
@@ -263,6 +305,7 @@ export class LlamaServerManager {
     let stdoutBuf = '';
     child.stdout?.on('data', (chunk: Buffer) => {
       logStream.write(chunk);
+      this.fatalOutput ??= findFatalOutput(chunk.toString('utf8'));
       if (onLogLine) {
         stdoutBuf += chunk.toString('utf8');
         const lines = stdoutBuf.split('\n');
@@ -276,6 +319,7 @@ export class LlamaServerManager {
     let stderrBuf = '';
     child.stderr?.on('data', (chunk: Buffer) => {
       logStream.write(chunk);
+      this.fatalOutput ??= findFatalOutput(chunk.toString('utf8'));
       if (onLogLine) {
         stderrBuf += chunk.toString('utf8');
         const lines = stderrBuf.split('\n');
@@ -306,7 +350,18 @@ export class LlamaServerManager {
         throw new Error(`llama-server exited unexpectedly with ${describeExit(child)}.${this.logTail()}`);
       }
 
-      if ((await this.health(origin, signal)) === 'ready') return;
+      // Only a server this manager spawned has output to judge; an external one is taken as-is.
+      if (child && this.fatalOutput) {
+        throw new Error(`llama-server started but cannot serve: ${this.fatalOutput}.${this.logTail()}`);
+      }
+
+      if ((await this.health(origin, signal)) === 'ready') {
+        // Health turns green the moment the model is loaded, which happens after a failed warmup.
+        if (child && this.fatalOutput) {
+          throw new Error(`llama-server started but cannot serve: ${this.fatalOutput}.${this.logTail()}`);
+        }
+        return;
+      }
 
       if (Date.now() >= deadline) {
         const secs = Math.round(this.readyTimeoutMs / 1000);

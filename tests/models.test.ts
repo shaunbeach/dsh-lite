@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { effectiveServerContext, findModelsConfigPath, loadModelsConfig, resolveHomePath } from '../src/config/models.js';
 import { ContextManager, elideToolResultContent, estimateMessageTokens } from '../src/context.js';
-import { LlamaServerManager, sameLaunch, serverOrigin } from '../src/llm/server.js';
+import { findFatalOutput, LlamaServerManager, sameLaunch, serverOrigin } from '../src/llm/server.js';
 import type { ChatMessage } from '../src/llm/types.js';
 import { DEFAULT_SAMPLING, DeepSeekClient } from '../src/llm/client.js';
 import { Agent } from '../src/agent.js';
@@ -712,5 +712,97 @@ test('The checked-in example catalogue is valid and machine-independent', async 
     assert.ok(models.some((m) => m.sampling?.instruct?.temperature !== undefined), 'per-mode sampling');
     assert.ok(models.some((m) => m.sampling?.thinking?.extra), 'chat_template_kwargs via extra');
     assert.ok(models.some((m) => m.launchArgs.includes('--mmproj')), 'a vision projector');
+  });
+});
+
+test('A server that reports healthy after a GPU failure is refused', async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-oom-'));
+  const port = 20000 + Math.floor(Math.random() * 20000);
+
+  // Reproduces the real llama-server sequence: the Metal warmup decode fails out of memory,
+  // then the server finishes starting and answers /health with 200 regardless.
+  const fake = path.join(tmpDir, 'fake-llama.mjs');
+  await fs.writeFile(fake, `
+import http from 'node:http';
+console.error('ggml_metal_synchronize: error: command buffer 0 failed with status 5');
+console.error('error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)');
+console.error('llama_decode: failed to decode, ret = -3');
+setTimeout(() => {
+  console.log('srv  llama_server: model loaded');
+  http.createServer((_q, r) => { r.writeHead(200, {'content-type':'application/json'}); r.end('{"status":"ok"}'); }).listen(${port});
+}, 150);
+`, 'utf8');
+
+  const wrapper = path.join(tmpDir, 'llama-server');
+  await fs.writeFile(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`, 'utf8');
+  await fs.chmod(wrapper, 0o755);
+  const weights = path.join(tmpDir, 'model.gguf');
+  await fs.writeFile(weights, 'weights', 'utf8');
+
+  const manager = new LlamaServerManager({
+    logFile: path.join(tmpDir, 'llama.log'),
+    readyTimeoutMs: 10_000,
+    pollIntervalMs: 50,
+  });
+
+  const model: any = {
+    id: 'TooBig', name: 'TooBig', modelPath: weights,
+    baseUrl: `http://localhost:${port}/v1`,
+    llamaServer: wrapper,
+    reasoning: false, contextWindow: 22480, maxTokens: 8192,
+    launchArgs: ['--ctx-size', '22480'],
+  };
+
+  try {
+    await t.test('the failure is reported instead of a ready server', async () => {
+      await assert.rejects(
+        manager.ensure(model),
+        /cannot serve: the GPU ran out of memory/,
+        'a healthy status must not outrank the server saying it failed'
+      );
+    });
+
+    await t.test('the message says what to change', async () => {
+      const error = await manager.ensure(model).catch((err: Error) => err.message);
+      assert.match(error as string, /--ctx-size or --ubatch-size/);
+    });
+
+    await t.test('nothing is left marked active', () => {
+      assert.strictEqual(manager.model, undefined);
+      assert.strictEqual(manager.isRunning, false, 'the broken server must be torn down');
+    });
+  } finally {
+    await manager.stop();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Server output classification', async (t) => {
+  await t.test('a fit warning alone is not fatal', () => {
+    // This precedes plenty of loads that go on to work.
+    const manager = new LlamaServerManager();
+    void manager;
+    assert.strictEqual(
+      findFatalOutput('W common_fit_params: failed to fit params to free device memory: abort'),
+      undefined
+    );
+  });
+
+  await t.test('routine startup noise is not fatal', () => {
+    for (const line of [
+      'srv llama_server: CORS is set to allow all origins',
+      'srv load_model: initializing, n_slots = 1',
+      'W srv init: chat template supports preserving reasoning',
+      'srv llama_server: listening on http://127.0.0.1:8080',
+    ]) {
+      assert.strictEqual(findFatalOutput(line), undefined, line);
+    }
+  });
+
+  await t.test('real failures are caught', () => {
+    assert.match(findFatalOutput('error: Insufficient Memory (kIOGPUCommandBufferCallbackErrorOutOfMemory)')!, /GPU ran out of memory/);
+    assert.match(findFatalOutput('ggml_metal_graph_compute: backend is in error state')!, /cannot recover/);
+    assert.match(findFatalOutput('E llama_decode: failed to decode, ret = -3')!, /forward pass/);
+    assert.match(findFatalOutput('error loading model architecture')!, /could not be loaded/);
   });
 });
