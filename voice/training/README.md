@@ -43,15 +43,19 @@ fails harmlessly and the cell tolerates it.
 The notebook pulls the phrase settings from `hey_amy.yaml` in this repository at run time, so editing
 that file changes the next training run without touching the notebook.
 
-### If the install cell fails
+### Why there are two Python environments
 
-**`No matching distribution found for piper-phonemize`** means Colab's Python is 3.13 or newer.
-`piper-phonemize` builds espeak-ng and its newest Linux wheel is cp312, so there is nothing to
-install; the notebook checks the version first and says so rather than failing three cells later.
-The fix is a runtime with Python 3.12 or earlier — on Colab, *Runtime → Change runtime type* has
-offered older images at times, and the alternative is a local machine with 3.11 or 3.12.
+Colab runs Python 3.13. `piper-phonemize` builds espeak-ng and its newest Linux wheel is cp311, so
+the training stack cannot be installed into the notebook kernel at all — which is where the original
+notebook now dies on its first cell.
 
-Two things the original notebook gets wrong today, both already fixed here: `piper-sample-generator`
+So the first cell uses `uv` to fetch a standalone Python 3.11 and build a second environment beside
+the notebook. The download cells stay in the kernel; only the three training steps run under the
+other interpreter. Nothing has to be configured for this — the cell prints both versions, and proves
+the training environment by importing openwakeword, torch and the phonemizer before anything long
+starts.
+
+Two more things the original gets wrong today, also fixed here: `piper-sample-generator`
 must be pinned to **v2.0.0**, because master has been restructured into a package and no longer
 exposes the `generate_samples` module openWakeWord's trainer imports; and openwakeword must be
 installed with `--no-deps`, because its dependency list pins `tflite-runtime` and `speexdsp-ns`,
