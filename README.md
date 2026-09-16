@@ -143,6 +143,9 @@ Sent back, for the daemon to speak:
 | `{"type":"done","summary":"..."}` | A turn finished, condensed to one or two sentences. |
 | `{"type":"error","message":"..."}` | A line could not be understood. The connection stays up. |
 
+A daemon implementing the speaking end lives in [`voice/`](voice/README.md): openWakeWord for the
+trigger, Silero VAD for endpointing, and MLX Whisper loaded per clip and dropped after.
+
 Drive it without a daemon:
 
 ```sh

@@ -1,0 +1,8 @@
+# Wake word, plus the bundled Silero VAD model and the ONNX runtime both use.
+openwakeword>=0.6
+onnxruntime>=1.17
+# Microphone capture.
+sounddevice>=0.4
+numpy>=1.24
+# Transcription on Apple Silicon.
+mlx-whisper>=0.4
