@@ -70,7 +70,12 @@ class Config:
     max_utterance_ms: int = 20_000
     #: Audio kept from before the wake word fired, for speech that runs straight on from it.
     preroll_ms: int = 300
+    #: After dictation, how long to keep listening without the wake word. Saying "go" is part of the
+    #: same breath as the instruction it sends, so it should not need waking up again.
+    follow_up_ms: int = 8_000
     speak: bool = True
+    #: What it calls itself, in the acknowledgement and in logs.
+    name: str = "Amy"
     ack_phrase: str = "Got it"
     voice_name: str | None = None
     input_device: int | str | None = None
@@ -310,7 +315,7 @@ class Listener:
             device=self.config.input_device,
             callback=self._on_audio,
         ):
-            log(f'listening for "{self.config.wake_word}"')
+            log(f'{self.config.name} is listening for "{self.config.wake_word}"')
             while True:
                 frame = self.frames.get()
 
@@ -328,13 +333,29 @@ class Listener:
                     continue
 
                 log(f"wake ({score:.2f})")
-                utterance = self._record()
+                self._converse(on_utterance)
                 self.wake.reset()
                 self.preroll.clear()
-                if utterance is not None:
-                    on_utterance(utterance)
 
-    def _record(self) -> Utterance | None:
+    def _converse(self, on_utterance) -> None:
+        """
+        Handles one exchange, staying open after dictation.
+
+        Sending is its own utterance, so requiring the wake word before it would mean saying the
+        name twice to give one instruction. After text the microphone stays live briefly; after a
+        send or a stop the turn is the harness's, and waking is required again.
+        """
+        lead_in_ms = self.config.lead_in_ms
+        while True:
+            utterance = self._record(lead_in_ms)
+            if utterance is None:
+                return
+            if on_utterance(utterance) != "text":
+                return
+            lead_in_ms = self.config.follow_up_ms
+            log(f"listening for more ({lead_in_ms / 1000:.0f}s)")
+
+    def _record(self, lead_in_ms: int) -> Utterance | None:
         """Records until the speaker stops, or gives up if they never start."""
         config = self.config
         self.endpointer.reset()
@@ -371,7 +392,7 @@ class Listener:
 
             if started and silence_ms >= config.silence_ms:
                 break
-            if not started and waited_ms >= config.lead_in_ms:
+            if not started and waited_ms >= lead_in_ms:
                 log("nothing said")
                 return None
             if speech_ms + silence_ms >= config.max_utterance_ms:
@@ -422,6 +443,8 @@ def parse_args(argv: list[str]) -> Config:
     parser.add_argument("--whisper", default=defaults.whisper_repo)
     parser.add_argument("--silence-ms", type=int, default=defaults.silence_ms)
     parser.add_argument("--lead-in-ms", type=int, default=defaults.lead_in_ms)
+    parser.add_argument("--follow-up-ms", type=int, default=defaults.follow_up_ms)
+    parser.add_argument("--name", default=defaults.name, help="what it calls itself in logs and speech")
     parser.add_argument("--max-utterance-ms", type=int, default=defaults.max_utterance_ms)
     parser.add_argument("--vad-threshold", type=float, default=defaults.vad_threshold)
     parser.add_argument("--voice", dest="voice_name", default=None, help="a `say` voice, e.g. Samantha")
@@ -449,6 +472,8 @@ def parse_args(argv: list[str]) -> Config:
         vad_threshold=args.vad_threshold,
         silence_ms=args.silence_ms,
         lead_in_ms=args.lead_in_ms,
+        follow_up_ms=args.follow_up_ms,
+        name=args.name,
         max_utterance_ms=args.max_utterance_ms,
         speak=not args.no_speak,
         voice_name=args.voice_name,
@@ -468,7 +493,7 @@ def main(argv: list[str]) -> int:
     endpointer = Endpointer(model_dir, config.vad_threshold)
     listener = Listener(config, endpointer, speaker)
 
-    def handle(utterance: Utterance) -> None:
+    def handle(utterance: Utterance) -> str:
         # Acknowledge before transcribing: the speaker has stopped and is waiting to hear something,
         # and the harness has nothing to say until it knows what was said.
         speaker.say(config.ack_phrase)
@@ -476,7 +501,7 @@ def main(argv: list[str]) -> int:
         text = transcriber.transcribe(utterance.audio)
         if not text:
             log("nothing transcribed")
-            return
+            return "empty"
 
         kind, spoken = classify(text)
         log(f"{kind}: {spoken}")
@@ -487,6 +512,7 @@ def main(argv: list[str]) -> int:
             harness.send({"type": "submit"})
         else:
             harness.send({"type": "text", "text": spoken})
+        return kind
 
     try:
         listener.run(handle)

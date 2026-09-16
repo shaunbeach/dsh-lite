@@ -43,12 +43,20 @@ ln -s ~/Documents/dsh-lite/voice/dsh-voice ~/.local/bin/dsh-voice
 
 Then it is just `dsh-voice`. Options are passed straight through, for example `dsh-voice -v`.
 
-Say **"hey jarvis"**, then your instruction. The words land in the dsh input line without being
-submitted, so a misheard one can be seen and corrected. Say **"send it"** or **"go"** to run it, or
-**"stop"** to abort a running turn.
+Say the wake word, then your instruction. The words land in the dsh input line **without being
+submitted**, so a misheard one can be seen and corrected first.
 
-Control phrases only count as commands when they are the whole utterance: *"go ahead and write the
-file"* is dictated, not treated as a request to send.
+To send it, either press Enter, or just keep talking — after dictation the microphone stays live for
+eight seconds, so **"go"** or **"send it"** needs no second wake word:
+
+> "Hey Amy, write me a template for a project readme and save it as notes.md"
+> *(the line fills in)*
+> "go"
+
+**"stop"** aborts a running turn, and is the Escape key. Control phrases only count when they are the
+whole utterance: *"go ahead and write the file"* is dictated, not read as a request to send. The
+follow-up window closes after a send or a stop, so the wake word is needed again for the next
+instruction; `--follow-up-ms 0` turns it off entirely.
 
 ## Memory
 
@@ -71,12 +79,32 @@ almost nothing. Transcription of a five-second clip takes roughly two seconds.
 | `--device` / `--list-devices` | default input | Choose a microphone. |
 | `-v` | off | Log timings and memory held after each unload. |
 
-## A custom wake word
+## The name, and the wake word
 
-`hey_jarvis` is one of openWakeWord's pretrained models, alongside `alexa`, `hey_mycroft` and
-`hey_rhasspy`. A word of your own — "Hey Amy" — needs a model trained from synthetic speech through
-openWakeWord's training pipeline, which is automated but takes hours rather than minutes. Point
-`--wake-word` at the resulting `.onnx` once it exists; nothing else changes.
+It calls itself **Amy** — in the log line at startup and in anything it speaks — and `--name` changes
+that.
+
+The *trigger phrase* is a separate thing, and it is still `hey_jarvis`, because a wake word is a
+trained neural model rather than a string to match. openWakeWord ships six: `alexa`, `hey_jarvis`,
+`hey_mycroft`, `hey_rhasspy`, `timer` and `weather`. None of them is "Amy".
+
+To actually say "Hey Amy", a model has to be trained on synthetic speech of that phrase. Two routes:
+
+- **openWakeWord's training notebook**, run on a free Colab GPU. Roughly an hour, mostly unattended,
+  and nothing is installed on your machine.
+- **Locally**, with `openwakeword.train`. It needs torch, torchinfo and torchmetrics — around 2 GB of
+  install, competing for the same memory the language model wants, on top of generating tens of
+  thousands of training clips.
+
+The notebook is the better trade. Either way the result is one `.onnx` file, and `wakeword_models`
+accepts a path, so nothing else changes:
+
+```sh
+dsh-voice --wake-word ~/.dsh/wake/hey_amy.onnx
+```
+
+Validating the pipeline on `hey_jarvis` first is worth the ten minutes: if something is wrong with
+the microphone, the socket or the thresholds, better to find out before spending an hour training.
 
 ## Speaking
 
