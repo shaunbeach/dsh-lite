@@ -43,6 +43,20 @@ fails harmlessly and the cell tolerates it.
 The notebook pulls the phrase settings from `hey_amy.yaml` in this repository at run time, so editing
 that file changes the next training run without touching the notebook.
 
+### If the install cell fails
+
+**`No matching distribution found for piper-phonemize`** means Colab's Python is 3.13 or newer.
+`piper-phonemize` builds espeak-ng and its newest Linux wheel is cp312, so there is nothing to
+install; the notebook checks the version first and says so rather than failing three cells later.
+The fix is a runtime with Python 3.12 or earlier — on Colab, *Runtime → Change runtime type* has
+offered older images at times, and the alternative is a local machine with 3.11 or 3.12.
+
+Two things the original notebook gets wrong today, both already fixed here: `piper-sample-generator`
+must be pinned to **v2.0.0**, because master has been restructured into a package and no longer
+exposes the `generate_samples` module openWakeWord's trainer imports; and openwakeword must be
+installed with `--no-deps`, because its dependency list pins `tflite-runtime` and `speexdsp-ns`,
+neither of which resolves on a current Colab and neither of which training needs.
+
 Budget 45–60 minutes. Generating the speech is nearly all of it; training itself is minutes.
 
 Colab rather than locally: training wants torch, torchinfo, torchmetrics, speechbrain,
