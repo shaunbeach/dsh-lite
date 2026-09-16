@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output; `npm install` runs `prepare`, which rebuilds it
+dist/
+*.tsbuildinfo
+
+# Session transcripts written by dsh into whatever directory it runs in
+.dsh/
+
+# macOS
+.DS_Store
+
+# Your own model catalogue: paths differ per machine.
+# Start from the checked-in example: cp models.example.yml models.yml
+/models.yml

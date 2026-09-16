@@ -1,0 +1,38 @@
+{
+  "name": "dsh-lite",
+  "version": "0.1.0",
+  "description": "Ultra-lightweight interactive terminal AI coding assistant for DeepSeek",
+  "type": "module",
+  "bin": {
+    "dsh": "./bin/dsh.js"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "build": "tsc",
+    "prepare": "npm run build",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "keywords": [
+    "deepseek",
+    "agent",
+    "cli",
+    "terminal",
+    "repl",
+    "coding-assistant"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@earendil-works/pi-tui": "^0.85.1",
+    "diff": "^7.0.0",
+    "js-yaml": "^5.4.2",
+    "openai": "^4.86.1",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

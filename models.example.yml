@@ -1,0 +1,179 @@
+# dsh-lite model catalogue.
+#
+# Copy this file to models.yml and edit the paths for your machine:
+#
+#     cp models.example.yml models.yml
+#
+# dsh looks for models.yml in the directory it was started from, then
+# ~/.dsh/models.yml, then beside this install. Your own models.yml is ignored by
+# git, so it never travels with the repository.
+
+providers:
+  llamacpp:
+    # Where dsh talks to llama-server. Every model below shares this port unless it
+    # sets its own baseUrl, so switching models restarts the one server.
+    baseUrl: http://localhost:8080/v1
+
+    # Relative `id` paths resolve against this directory. `~` is expanded.
+    modelDir: ~/GGUFs
+
+    # The llama-server binary. A bare name is looked up on PATH.
+    llamaServer: llama-server
+
+    models:
+      # --- A plain instruct model ------------------------------------------
+      - id: Qwen3-4B-Instruct-2507/Qwen3-4B-Instruct-2507.gguf
+        name: Qwen3-4B-Instruct
+        reasoning: false
+        input:
+          - text
+        # contextWindow is the window dsh budgets prompts against. It may not
+        # exceed the --ctx-size below; dsh lowers it to match and says so.
+        contextWindow: 65536
+        # Tokens held back for one reply, reasoning included. A turn that runs
+        # past this is cut off, so give thinking models room.
+        maxTokens: 16384
+        launchArgs:
+          - "--port"
+          - "8080"
+          - "--ctx-size"
+          - "65536"
+          - "--n-gpu-layers"
+          - "99"
+          - "--parallel"
+          - "1"
+          - "--flash-attn"
+          - "on"
+          - "--cache-type-k"
+          - "q8_0"
+          - "--cache-type-v"
+          - "q8_0"
+
+      # --- A reasoning model -----------------------------------------------
+      # reasoning: true lets /mode send the template's thinking switch.
+      # /mode thinking sends enable_thinking: true, /mode instruct sends false.
+      - id: Qwen3.5-4B/Qwen3.5-4B-Q6_K.gguf
+        name: Qwen3.5-4B
+        reasoning: true
+        input:
+          - text
+        contextWindow: 131072
+        maxTokens: 16384
+        launchArgs:
+          - "--port"
+          - "8080"
+          - "--ctx-size"
+          - "131072"
+          - "--n-gpu-layers"
+          - "99"
+          - "--parallel"
+          - "1"
+          - "--flash-attn"
+          - "on"
+          - "--cache-type-k"
+          - "q8_0"
+          - "--cache-type-v"
+          - "q8_0"
+
+      # --- The same weights with a vision projector -------------------------
+      # Entries may share a GGUF. dsh keys server reuse on the whole launch
+      # configuration, so switching between these two restarts llama-server
+      # (the projector has to be loaded, and the context size differs).
+      # Note contextWindow matches --ctx-size, which is lower here because the
+      # projector wants the memory back.
+      - id: Qwen3.5-4B/Qwen3.5-4B-Q6_K.gguf
+        name: Qwen3.5-4B-Vision
+        reasoning: true
+        input:
+          - text
+          - image
+        contextWindow: 81920
+        maxTokens: 16384
+        launchArgs:
+          - "--port"
+          - "8080"
+          - "--ctx-size"
+          - "81920"
+          - "--mmproj"
+          - "~/GGUFs/Qwen3.5-4B/mmproj-Qwen3.5-4B-F16.gguf"
+          - "--n-gpu-layers"
+          - "99"
+          - "--parallel"
+          - "1"
+          - "--flash-attn"
+          - "on"
+          - "--cache-type-k"
+          - "q8_0"
+          - "--cache-type-v"
+          - "q8_0"
+
+      # --- Per-model sampling ------------------------------------------------
+      # Without a sampling block a model gets dsh's defaults for the active mode.
+      # A block overrides individual fields, per mode, and is re-read whenever
+      # /mode switches. temperature, top_p, top_k, min_p and presence_penalty all
+      # reach llama-server; `extra` carries anything else, merged last.
+      - id: Ministral-3-8B/Ministral-3-8B-Instruct-2512-Q4_K_M.gguf
+        name: Ministral-3-8B-Instruct
+        reasoning: false
+        input:
+          - text
+        contextWindow: 65536
+        maxTokens: 16384
+        launchArgs:
+          - "--port"
+          - "8080"
+          - "--ctx-size"
+          - "65536"
+          - "--n-gpu-layers"
+          - "99"
+          - "--parallel"
+          - "1"
+          - "--flash-attn"
+          - "on"
+        sampling:
+          # Mistral asks for a temperature below 0.1 and names no other samplers,
+          # so top_p and top_k are set wide open rather than truncating.
+          instruct:
+            temperature: 0.05
+            top_p: 1.0
+            top_k: 0
+            min_p: 0.0
+            presence_penalty: 0.0
+          thinking:
+            temperature: 0.05
+            top_p: 1.0
+            top_k: 0
+            min_p: 0.0
+            presence_penalty: 0.0
+
+      # --- Reasoning effort through the chat template -------------------------
+      # `mode: instruct` starts this entry with thinking off even though the model
+      # supports it. `extra.chat_template_kwargs` is merged key by key with the
+      # thinking switch, so both reach the server.
+      - id: Qwen3.8-27B/Qwen3.8-27B-IQ3_XXS.gguf
+        name: Qwen3.8-27B-xhigh
+        reasoning: true
+        input:
+          - text
+        contextWindow: 22480
+        maxTokens: 12288
+        launchArgs:
+          - "--port"
+          - "8080"
+          - "--ctx-size"
+          - "22480"
+          - "--n-gpu-layers"
+          - "99"
+          - "--parallel"
+          - "1"
+          - "--flash-attn"
+          - "on"
+          - "--cache-type-k"
+          - "q8_0"
+          - "--cache-type-v"
+          - "q8_0"
+        sampling:
+          thinking:
+            extra:
+              chat_template_kwargs:
+                reasoning_effort: xhigh
