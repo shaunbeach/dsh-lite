@@ -56,6 +56,17 @@ DEFAULT_SOCKET = Path.home() / ".dsh" / "input.sock"
 ABORT_PHRASES = {"stop", "stop it", "cancel", "abort", "never mind", "nevermind", "quit that"}
 SUBMIT_PHRASES = {"send it", "send", "go", "go ahead", "do it", "run it", "submit", "okay go", "ok go"}
 
+#: Answers to "shall I send that now?". Anything else is taken as more of the instruction, and
+#: silence is taken as no, so nothing is ever sent without having been agreed to.
+YES_PHRASES = {
+    "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "please", "please do", "affirmative",
+    "yes send it", "yes please", "send it", "send", "go", "go ahead", "do it", "run it", "submit",
+}
+NO_PHRASES = {
+    "no", "nope", "no thanks", "dont", "dont send it", "do not send it", "dont send",
+    "cancel", "stop", "wait", "not yet", "hold on", "never mind", "nevermind", "scratch that",
+}
+
 
 @dataclass
 class Config:
@@ -73,9 +84,14 @@ class Config:
     max_utterance_ms: int = 20_000
     #: Audio kept from before the wake word fired, for speech that runs straight on from it.
     preroll_ms: int = 300
-    #: After dictation, how long to keep listening without the wake word. Saying "go" is part of the
-    #: same breath as the instruction it sends, so it should not need waking up again.
-    follow_up_ms: int = 8_000
+    #: Whether to ask before sending dictated text.
+    confirm: bool = True
+    confirm_phrase: str = "Shall I send that now?"
+    #: How long to wait for an answer. Timing starts when the question finishes, not when it starts.
+    confirm_ms: int = 3_000
+    #: How many times to ask. More of the instruction can be added instead of answering, and each
+    #: addition earns another question; the cap stops that going round forever.
+    confirm_rounds: int = 3
     speak: bool = True
     #: What it calls itself, in the acknowledgement and in logs.
     name: str = "Amy"
@@ -302,12 +318,26 @@ class Listener:
         preroll_frames = max(1, (config.preroll_ms * SAMPLE_RATE // 1000) // WAKE_FRAME)
         self.preroll: collections.deque[np.ndarray] = collections.deque(maxlen=preroll_frames)
 
+    def _drain(self) -> None:
+        """
+        Throws away audio captured while we were talking.
+
+        Frames queue up faster than they are read, so when `say` exits there is still buffered audio
+        from while it was speaking. Without dropping it, the tail of a question arrives as the start
+        of the answer: "shall I send that now?" followed by "yes" is heard as "that now? Yes."
+        """
+        try:
+            while True:
+                self.frames.get_nowait()
+        except queue.Empty:
+            pass
+
     def _on_audio(self, indata, _frames, _time, status) -> None:
         if status:
             log(f"audio status: {status}")
         self.frames.put(indata[:, 0].copy())
 
-    def run(self, on_utterance) -> None:
+    def run(self, on_utterance, on_confirm) -> None:
         import sounddevice as sd
 
         with sd.InputStream(
@@ -319,6 +349,7 @@ class Listener:
             callback=self._on_audio,
         ):
             log(f'{self.config.name} is listening for "{self.config.wake_word}"')
+            speaking = False
             while True:
                 frame = self.frames.get()
 
@@ -327,6 +358,11 @@ class Listener:
                 if self.speaker.is_speaking:
                     self.wake.reset()
                     self.preroll.clear()
+                    speaking = True
+                    continue
+                if speaking:
+                    speaking = False
+                    self._drain()
                     continue
 
                 self.preroll.append(frame)
@@ -336,27 +372,34 @@ class Listener:
                     continue
 
                 log(f"wake ({score:.2f})")
-                self._converse(on_utterance)
+                self._converse(on_utterance, on_confirm)
                 self.wake.reset()
                 self.preroll.clear()
 
-    def _converse(self, on_utterance) -> None:
+    def _converse(self, on_utterance, on_confirm) -> None:
         """
-        Handles one exchange, staying open after dictation.
+        Handles one exchange: an instruction, then a question about whether to send it.
 
-        Sending is its own utterance, so requiring the wake word before it would mean saying the
-        name twice to give one instruction. After text the microphone stays live briefly; after a
-        send or a stop the turn is the harness's, and waking is required again.
+        Asking is what makes voice safe to leave unattended. Transcription mishears, and the harness
+        acts without asking, so nothing is sent on a guess: a clear yes sends, a no or silence does
+        not, and the words stay in the input line either way to be corrected or sent by hand.
         """
-        lead_in_ms = self.config.lead_in_ms
-        while True:
-            utterance = self._record(lead_in_ms)
-            if utterance is None:
+        utterance = self._record(self.config.lead_in_ms)
+        if utterance is None:
+            return
+        if on_utterance(utterance) != "text" or not self.config.confirm:
+            return
+
+        for _ in range(self.config.confirm_rounds):
+            self.speaker.say(self.config.confirm_phrase)
+            # Recording waits out our own question, so the answer window starts when it ends.
+            reply = self._record(self.config.confirm_ms)
+            if reply is None:
+                log("no answer; leaving it unsent")
                 return
-            if on_utterance(utterance) != "text":
+            if on_confirm(reply) != "more":
                 return
-            lead_in_ms = self.config.follow_up_ms
-            log(f"listening for more ({lead_in_ms / 1000:.0f}s)")
+        log("asked enough; leaving it unsent")
 
     def _record(self, lead_in_ms: int) -> Utterance | None:
         """Records until the speaker stops, or gives up if they never start."""
@@ -366,6 +409,7 @@ class Listener:
         collected: list[np.ndarray] = list(self.preroll)
         carry = np.zeros(0, dtype=np.int16)
         started = False
+        speaking = False
         speech_ms = 0
         silence_ms = 0
         waited_ms = 0
@@ -377,6 +421,11 @@ class Listener:
             # opens, and a microphone hears it. Recording through it puts "Got it" into the
             # instruction, so wait it out and start the utterance from scratch afterwards.
             if self.speaker.is_speaking:
+                speaking = True
+                continue
+            if speaking:
+                speaking = False
+                self._drain()
                 self.endpointer.reset()
                 collected.clear()
                 carry = np.zeros(0, dtype=np.int16)
@@ -429,6 +478,22 @@ class Intent:
 
 def _normalise(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", text)).strip().lower()
+
+
+def classify_confirmation(text: str) -> str:
+    """
+    Reads an answer to "shall I send that now?".
+
+    Anything that is not a clear yes or no is treated as more of the instruction rather than as an
+    answer, so a sentence like "and save it as notes.md" extends what is pending instead of being
+    guessed at. Only an explicit yes sends.
+    """
+    answer = _normalise(text)
+    if answer in YES_PHRASES:
+        return "yes"
+    if answer in NO_PHRASES:
+        return "no"
+    return "more"
 
 
 def classify(text: str) -> Intent:
@@ -485,7 +550,9 @@ def parse_args(argv: list[str]) -> Config:
     parser.add_argument("--whisper", default=defaults.whisper_repo)
     parser.add_argument("--silence-ms", type=int, default=defaults.silence_ms)
     parser.add_argument("--lead-in-ms", type=int, default=defaults.lead_in_ms)
-    parser.add_argument("--follow-up-ms", type=int, default=defaults.follow_up_ms)
+    parser.add_argument("--confirm-ms", type=int, default=defaults.confirm_ms)
+    parser.add_argument("--confirm-phrase", default=defaults.confirm_phrase)
+    parser.add_argument("--no-confirm", action="store_true", help="send dictation without asking")
     parser.add_argument("--name", default=defaults.name, help="what it calls itself in logs and speech")
     parser.add_argument("--max-utterance-ms", type=int, default=defaults.max_utterance_ms)
     parser.add_argument("--vad-threshold", type=float, default=defaults.vad_threshold)
@@ -514,7 +581,9 @@ def parse_args(argv: list[str]) -> Config:
         vad_threshold=args.vad_threshold,
         silence_ms=args.silence_ms,
         lead_in_ms=args.lead_in_ms,
-        follow_up_ms=args.follow_up_ms,
+        confirm=not args.no_confirm,
+        confirm_phrase=args.confirm_phrase,
+        confirm_ms=args.confirm_ms,
         name=args.name,
         max_utterance_ms=args.max_utterance_ms,
         speak=not args.no_speak,
@@ -535,14 +604,20 @@ def main(argv: list[str]) -> int:
     endpointer = Endpointer(model_dir, config.vad_threshold)
     listener = Listener(config, endpointer, speaker)
 
-    def handle(utterance: Utterance) -> str:
-        # Acknowledge before transcribing: the speaker has stopped and is waiting to hear something,
-        # and the harness has nothing to say until it knows what was said.
-        speaker.say(config.ack_phrase)
-
+    def transcribe_or_none(utterance: Utterance) -> str | None:
         text = transcriber.transcribe(utterance.audio)
         if not text:
             log("nothing transcribed")
+        return text or None
+
+    def handle(utterance: Utterance) -> str:
+        # An acknowledgement only earns its place when nothing else will be said: with confirmation
+        # on, the question that follows a couple of seconds later says the same thing and more.
+        if not config.confirm:
+            speaker.say(config.ack_phrase)
+
+        text = transcribe_or_none(utterance)
+        if text is None:
             return "empty"
 
         intent = classify(text)
@@ -564,8 +639,25 @@ def main(argv: list[str]) -> int:
             return "abort"
         return "text"
 
+    def confirm(utterance: Utterance) -> str:
+        """Answers the send question, or takes the reply as more of the instruction."""
+        text = transcribe_or_none(utterance)
+        if text is None:
+            return "no"
+
+        answer = classify_confirmation(text)
+        log(f"answer ({answer}): {text}")
+
+        if answer == "yes":
+            harness.send({"type": "submit"})
+        elif answer == "more":
+            # Not an answer, so it belongs to the instruction. The harness appends it, and the
+            # question comes round again for the longer version.
+            harness.send({"type": "text", "text": text})
+        return answer
+
     try:
-        listener.run(handle)
+        listener.run(handle, confirm)
     except KeyboardInterrupt:
         log("stopping")
     return 0

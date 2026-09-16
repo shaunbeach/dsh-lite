@@ -44,25 +44,31 @@ ln -s ~/Documents/dsh-lite/voice/dsh-voice ~/.local/bin/dsh-voice
 Then it is just `dsh-voice`. Options are passed straight through, for example `dsh-voice -v`.
 
 Say the wake word, then your instruction. The words land in the dsh input line **without being
-submitted**, so a misheard one can be seen and corrected first.
+submitted**, and Amy asks before sending:
 
-To send it, press Enter, or say **"go"** or **"send it"**. Either of two ways works:
-
-> "Hey Amy, check the weather in Paris. Go."
-
-said in one breath, or as two:
-
-> "Hey Amy, check the weather in Paris"
+> **"Hey Amy, check the weather in Paris"**
 > *(the line fills in, and you can read it)*
-> "go"
+> **"Shall I send that now?"**
+> **"yes"**
 
-After dictation the microphone stays live for eight seconds, so the second form needs no further
-wake word. **"stop"** aborts a running turn, and is the Escape key.
+- **"yes"**, "yeah", "sure", "send it", "go" — sends it.
+- **"no"**, "not yet", "wait", "don't send it" — leaves it in the line, to correct or send by hand.
+- **Silence** — the same as no. She waits three seconds, then goes back to idle.
+- **Anything else** is taken as more of the instruction, not as an answer: say *"and save it as
+  notes.md"* and it is appended, then she asks again. Three rounds, then she stops asking.
 
-A control phrase counts when it is the whole utterance, or the final sentence of one. That is what
-keeps *"go ahead and write the file"* and *"tell me where to go"* as dictation — Whisper punctuates,
-and the sentence break is the only signal for where the instruction stopped. The follow-up window
-closes after a send or a stop; `--follow-up-ms 0` turns it off.
+Nothing is ever sent without a clear yes, which is the point: transcription mishears, and the harness
+acts without asking a second time.
+
+If the send is already in what you said — *"check the weather in Paris. Go."* — she sends it without
+asking, since you have already answered the question. A control phrase counts when it is the whole
+utterance or its final sentence, which is what keeps *"tell me where to go"* and *"go ahead and write
+the file"* as dictation.
+
+**"stop"**, said on its own after the wake word, aborts a running turn. It is the Escape key.
+
+`--no-confirm` sends dictation straight away, `--confirm-ms` changes the three seconds, and
+`--confirm-phrase` changes what she asks.
 
 ## Memory
 
@@ -78,6 +84,10 @@ almost nothing. Transcription of a five-second clip takes roughly two seconds.
 | `--wake-word` | `hey_jarvis` | Any openWakeWord model name. |
 | `--wake-threshold` | `0.5` | Raise it if the wake word fires on its own. |
 | `--silence-ms` | `800` | Silence that ends an utterance. |
+| `--confirm-ms` | `3000` | How long to wait for an answer to "shall I send that now?". |
+| `--confirm-phrase` | *"Shall I send that now?"* | What she asks. |
+| `--no-confirm` | off | Send dictation without asking. |
+| `--name` | `Amy` | What she calls herself. |
 | `--lead-in-ms` | `3000` | How long to wait for speech after the wake word. |
 | `--whisper` | `mlx-community/whisper-large-v3-turbo` | Any MLX Whisper repo. |
 | `--voice` | system voice | A `say` voice, e.g. `Samantha`. |
@@ -114,10 +124,13 @@ the microphone, the socket or the thresholds, better to find out before spending
 
 ## Speaking
 
-Acknowledgement is local: the daemon says "Got it" the moment speech ends, because the harness has
-nothing to confirm until it has been given the text, and waiting for it would leave a silence
-exactly where the speaker expects an answer. The closing summary does come from the harness, which
-condenses the model's reply to a sentence or two.
+The send question doubles as the acknowledgement, so there is no separate "Got it" to sit through:
+hearing *"shall I send that now?"* confirms both that the words arrived and what is about to happen
+with them. With `--no-confirm` there is nothing else to say, so the acknowledgement comes back.
 
-While the daemon is speaking it ignores the microphone, so its own output cannot trigger the wake
-word through the speakers.
+The closing summary comes from the harness, which condenses the model's reply to a sentence or two.
+
+While she is speaking the microphone is ignored, and audio captured during it is thrown away rather
+than processed late. Frames queue faster than they are read, so without that the tail of a question
+arrives as the start of the answer — *"shall I send that now?"* followed by *"yes"* is heard as
+*"that now? Yes."*, which is neither a yes nor a no.
