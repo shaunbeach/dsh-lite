@@ -22,7 +22,7 @@ export interface SlashCommand {
 export const COMMANDS: readonly { name: CommandName; description: string; argumentHint?: string }[] = [
   { name: 'agent', description: 'Switch to agent mode (autonomous coding with all tools)' },
   { name: 'plan', description: 'Switch to plan mode (design & implementation planning, read-only tools)' },
-  { name: 'chat', description: 'Switch to chat mode (conversational chatbot, no tools)' },
+  { name: 'chat', description: 'Switch to chat mode (conversation plus web search, no file or shell tools)' },
   { name: 'model', description: 'Switch model (picker lists local models)', argumentHint: '[name]' },
   { name: 'mode', description: 'Switch between thinking and instruct sampling', argumentHint: '[thinking|instruct]' },
   { name: 'serve', description: 'Serve a model as a remote host with live server logs' },

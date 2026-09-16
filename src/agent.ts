@@ -65,6 +65,16 @@ export function resolveMaxSteps(option: number | undefined, envValue?: string): 
   return requested === 0 ? Infinity : requested;
 }
 
+/**
+ * Tools each restricted mode exposes, by name. Agent mode is absent because it gets everything
+ * registered. Chat mode keeps the web tools: answering from training data alone would leave the
+ * model unable to look anything up, and reading a page changes nothing in the workspace.
+ */
+const TOOLS_BY_MODE: Record<Exclude<InteractionMode, 'agent'>, readonly string[]> = {
+  plan: ['view_file', 'list_dir', 'grep_search', 'web_search', 'web_fetch'],
+  chat: ['web_search', 'web_fetch'],
+};
+
 /** Stands in for a tool result the user aborted before the tool could run. */
 export const CANCELLED_TOOL_RESULT = 'Tool call was not executed: the user aborted this turn.';
 
@@ -228,15 +238,11 @@ export class Agent {
       step++;
       const stepStartTime = Date.now();
 
-      let tools: any[] = [];
-      if (this.interactionMode === 'agent') {
-        tools = this.registry.getOpenAITools();
-      } else if (this.interactionMode === 'plan') {
-        const readOnlyTools = ['view_file', 'list_dir', 'grep_search', 'web_search', 'web_fetch'];
-        tools = this.registry.getOpenAITools().filter(t => readOnlyTools.includes(t.function.name));
-      } else {
-        tools = [];
-      }
+      const allowed =
+        this.interactionMode === 'agent' ? undefined : TOOLS_BY_MODE[this.interactionMode];
+      const tools = allowed
+        ? this.registry.getOpenAITools().filter(t => allowed.includes(t.function.name))
+        : this.registry.getOpenAITools();
 
       // The tool schemas travel with every request and are rendered into the
       // prompt, so they come out of the same window the messages do.

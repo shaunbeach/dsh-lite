@@ -149,12 +149,20 @@ test('Agent interaction modes filter tools and configure prompt correctly', asyn
   assert.strictEqual(toolNames.includes('bash'), false);
   assert.ok(agent.messages[0].content?.includes('PLANNING ASSISTANT') || agent.messages[0].content?.includes('plan'));
 
-  // 3. Chat mode -> zero tools
+  // 3. Chat mode -> the web tools only, so it can still look things up
   agent.setInteractionMode('chat');
   assert.strictEqual(agent.interactionMode, 'chat');
   await agent.runTurn('Hello', {});
-  assert.strictEqual(toolsReceived.length, 0);
+  const chatToolNames = toolsReceived.map((t) => t.function.name);
+  assert.deepStrictEqual(chatToolNames.sort(), ['web_fetch', 'web_search']);
+  assert.strictEqual(chatToolNames.includes('view_file'), false, 'chat must not read the workspace');
+  assert.strictEqual(chatToolNames.includes('write_file'), false);
+  assert.strictEqual(chatToolNames.includes('bash'), false);
   assert.ok(agent.messages[0].content?.includes('conversational'));
+  assert.ok(
+    agent.messages[0].content?.includes('web_search'),
+    'the chat prompt must tell the model it can reach the internet'
+  );
 });
 
 test('Agent handles maxSteps and emits onNotice when limit reached', async () => {

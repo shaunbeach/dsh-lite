@@ -40,7 +40,8 @@ Zero Electron, zero React, zero browser dependencies. Instant startup (<40ms).
   - Stores conversations under `.dsh/sessions/` with `--resume` and `/resume <id>` support.
   - Writes a `.gitignore` in `.dsh/` so transcripts never appear as untracked files in your repository.
 - **Interactive Slash Commands**:
-  - `/agent`, `/plan`, `/chat`: Switch interaction mode (all tools, read-only tools, no tools).
+  - `/agent`, `/plan`, `/chat`: Switch interaction mode. Agent has every tool; plan has the
+    read-only ones; chat has web search and fetch, but nothing that touches the workspace.
   - `/model [name]`: Switch between local GGUFs (restarts or reuses `llama-server`) or cloud DeepSeek.
   - `/mode [thinking|instruct]`: Toggle sampling mode, including the model's thinking switch.
   - `/serve`: Host the selected model for other machines, with live server logs.
