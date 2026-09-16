@@ -129,6 +129,7 @@ export class Agent {
     return Boolean(this.activeModel || this.client.hasModel());
   }
 
+  /** Installs the system prompt for the current mode, keeping the conversation that follows it. */
   public initSystemPrompt() {
     const systemPrompt = buildSystemPrompt({
       cwd: this.cwd,
@@ -168,8 +169,17 @@ export class Agent {
     return restored;
   }
 
+  /**
+   * Starts an empty conversation in a new session.
+   *
+   * The messages are dropped explicitly. initSystemPrompt only rewrites the system message when one
+   * is already present, which is what a mode switch needs, so calling it alone would leave the whole
+   * previous conversation in place to be re-sent and re-processed on the next request.
+   */
   public clearHistory(): void {
     this.sessionId = this.sessionStore.createSessionId();
+    this.messages = [];
+    this.lastTurnMetrics = undefined;
     this.initSystemPrompt();
   }
 

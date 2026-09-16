@@ -451,3 +451,58 @@ test('A normal response produces no empty-response notice', async () => {
   await agent.runTurn('hello?', { onNotice: (message) => notices.push(message) });
   assert.deepStrictEqual(notices, []);
 });
+
+test('/clear starts an empty conversation, not just an empty screen', async (t) => {
+  const client = new DeepSeekClient();
+  const sent: ChatMessage[][] = [];
+  client.streamChat = async (messages) => {
+    sent.push(messages.map((m) => ({ ...m })));
+    return { content: 'x'.repeat(8000), reasoningContent: '', toolCalls: [] };
+  };
+
+  const agent = new Agent({ client });
+  agent.sessionStore.appendMessage = async () => {};
+  for (let turn = 0; turn < 3; turn++) await agent.runTurn(`question ${turn}`, {});
+
+  const before = agent.messages.length;
+  const sessionBefore = agent.sessionId;
+  assert.ok(before > 5, 'the conversation should have grown');
+
+  agent.clearHistory();
+
+  await t.test('the conversation is actually dropped', () => {
+    assert.deepStrictEqual(agent.messages.map((m) => m.role), ['system']);
+  });
+
+  await t.test('the next request carries no trace of the old turns', async () => {
+    await agent.runTurn('fresh question', {});
+    const request = sent.at(-1)!;
+    assert.deepStrictEqual(request.map((m) => m.role), ['system', 'user']);
+    assert.strictEqual(request[1].content, 'fresh question');
+    assert.strictEqual(
+      request.some((m) => typeof m.content === 'string' && m.content.includes('question 0')),
+      false,
+      'an old turn would be re-sent and re-processed by the server'
+    );
+  });
+
+  await t.test('a new session receives the messages, and the footer is reset', () => {
+    assert.notStrictEqual(agent.sessionId, sessionBefore);
+    // lastTurnMetrics is set again by the turn above; what matters is that clearing wiped it.
+    const other = new Agent({ client });
+    other.lastTurnMetrics = { promptTokens: 1, completionTokens: 1, totalTokens: 999, turnDurationMs: 1 };
+    other.clearHistory();
+    assert.strictEqual(other.lastTurnMetrics, undefined, 'the footer would keep showing a stale count');
+  });
+
+  await t.test('a mode switch still keeps the conversation', async () => {
+    const keeper = new Agent({ client });
+    keeper.sessionStore.appendMessage = async () => {};
+    await keeper.runTurn('remember this', {});
+    const lengthBefore = keeper.messages.length;
+    keeper.setInteractionMode('plan');
+    assert.strictEqual(keeper.messages.length, lengthBefore, 'switching mode must not discard history');
+    assert.strictEqual(keeper.messages[0].role, 'system');
+    assert.match(keeper.messages[0].content!, /planning assistant/i);
+  });
+});
