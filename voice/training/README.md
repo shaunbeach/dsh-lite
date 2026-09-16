@@ -29,28 +29,52 @@ receives it rather than as clean studio audio.
 
 ## Run it in Colab
 
-Use openWakeWord's `automatic_model_training.ipynb` from
-[github.com/dscripka/openWakeWord](https://github.com/dscripka/openWakeWord). It installs the
-training dependencies, clones `piper-sample-generator` and downloads the corpora, all on Google's
-machines.
+Open openWakeWord's training notebook straight from GitHub — nothing to download:
+
+**[colab.research.google.com/github/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb](https://colab.research.google.com/github/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb)**
+
+Set the runtime to a GPU (*Runtime → Change runtime type → T4*), then run the cells in order. The
+notebook installs the training dependencies, clones `piper-sample-generator`, and downloads the
+corpora onto Google's machines.
+
+The notebook does **not** take an uploaded config. It loads openWakeWord's own example and edits it
+in Python:
+
+```python
+config = yaml.load(open("openwakeword/examples/custom_model.yml", 'r').read(), yaml.Loader)
+config["target_phrase"] = ["hey sebastian"]
+```
+
+So the way to use `hey_amy.yaml` is to let the notebook own the paths, and take the phrase settings
+from it. **After that cell**, add one of your own:
+
+```python
+# Amy's phrase settings, over the notebook's downloaded paths.
+import yaml, urllib.request
+
+amy = yaml.safe_load(urllib.request.urlopen(
+    "https://raw.githubusercontent.com/shaunbeach/dsh-lite/main/voice/training/hey_amy.yaml"
+).read())
+
+for key in ("target_phrase", "model_name", "custom_negative_phrases", "n_samples", "n_samples_val"):
+    config[key] = amy[key]
+
+print(config["target_phrase"], config["model_name"],
+      len(config["custom_negative_phrases"]), "custom negatives")
+```
+
+Only those five keys. Everything else in the example config — `feature_data_files`,
+`batch_n_per_class`, and every path — describes what the notebook downloaded and where it put it, and
+overriding those is how a run dies after the generation step rather than before it. The remaining
+values in `hey_amy.yaml` (`layer_size`, `steps`, `max_negative_weight`,
+`target_false_positives_per_hour`) already match the example exactly, so there is nothing to change.
+
+Then run the rest of the notebook. Generation and augmentation are most of the wall clock; training
+itself is minutes.
 
 Colab is the right place for this. Locally it means torch, torchinfo, torchmetrics and `pronouncing`
 — about 2 GB of packages that are not needed to *run* the daemon — plus several GB of corpora, all
 competing for the 16 GB that the language model wants.
-
-When the notebook asks for a config, upload `hey_amy.yaml` and change only the paths at the bottom
-to wherever the notebook put its downloads. The notebook's own config is the authority on those
-paths; everything above them describes the phrase and is what this file is for.
-
-Then, in order:
-
-```sh
-python -m openwakeword.train --training_config hey_amy.yaml --generate_clips
-python -m openwakeword.train --training_config hey_amy.yaml --augment_clips
-python -m openwakeword.train --training_config hey_amy.yaml --train_model
-```
-
-Generation and augmentation are most of the wall clock. Training itself is minutes.
 
 ## Using the result
 

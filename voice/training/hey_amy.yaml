@@ -65,10 +65,9 @@ steps: 50000
 max_negative_weight: 1500
 target_false_positives_per_hour: 0.2
 
+# These keys must match feature_data_files below, plus the two the trainer adds itself.
 batch_n_per_class:
   ACAV100M_sample: 1024
-  fma: 256
-  audioset_16k: 256
   positive: 256
   adversarial_negative: 256
 
@@ -86,8 +85,6 @@ piper_sample_generator_path: ./piper-sample-generator
 # openWakeWord hosts; the notebook downloads them and sets these paths.
 feature_data_files:
   ACAV100M_sample: ./openwakeword_features_ACAV100M_2000_hrs_16bit.npy
-  fma: ./openwakeword_features_fma.npy
-  audioset_16k: ./openwakeword_features_audioset_16k.npy
 
 false_positive_validation_data_path: ./validation_set_features.npy
 
