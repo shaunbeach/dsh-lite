@@ -1,0 +1,104 @@
+# Training config for a "hey Amy" wake word.
+#
+# Used with openWakeWord's training script, which runs in four passes:
+#
+#   python -m openwakeword.train --training_config hey_amy.yaml --generate_clips
+#   python -m openwakeword.train --training_config hey_amy.yaml --augment_clips
+#   python -m openwakeword.train --training_config hey_amy.yaml --train_model
+#
+# Only the last stage is training, and only a small classifier is trained: the mel spectrogram and
+# speech embedding models in front of it are frozen and shipped with openwakeword. Everything above
+# the "paths" section describes the phrase; everything in it describes where the corpora landed, and
+# openWakeWord's automatic_model_training notebook sets those when it downloads them.
+
+model_name: hey_amy
+target_phrase:
+  - hey amy
+
+# ---------------------------------------------------------------------------
+# What the phrase is, and what it must not be confused with
+# ---------------------------------------------------------------------------
+
+# The trainer generates phonetic near-misses of the target automatically. These are added to them:
+# words that sound close enough to matter, and ordinary speech that should never wake it. Homophones
+# of the target are deliberately absent — "Aimee" is the wake word as far as any audio model is
+# concerned, and training against it would only teach the classifier to doubt itself.
+custom_negative_phrases:
+  - hey maybe
+  - hey baby
+  - hey Annie
+  - hey Emmy
+  - hey Abby
+  - hey Ellie
+  - hey army
+  - hey amen
+  - hey mate
+  - they may be
+  - hey am I
+  - make a copy
+  - hey can you
+  - anyway
+  - hey there
+  - okay then
+
+# Synthetic clips of the target phrase, spoken by many Piper voices at three speaking rates.
+# Tens of thousands is the usual scale; the cost is generation time, not training time.
+n_samples: 30000
+n_samples_val: 2000
+
+# Each clip is convolved with room impulse responses and mixed with background noise this many
+# times, so the model sees the phrase as a microphone across a room actually receives it.
+augmentation_rounds: 1
+augmentation_batch_size: 16
+
+# ---------------------------------------------------------------------------
+# The model, and what counts as good enough
+# ---------------------------------------------------------------------------
+
+model_type: dnn
+layer_size: 32
+steps: 50000
+
+# Negatives outnumber positives enormously, and a wake word that fires when it should not is worse
+# than one that occasionally misses: you can repeat yourself, but you cannot un-send a command.
+# The trainer keeps the checkpoint with the best recall among those under the false-positive target.
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2
+
+batch_n_per_class:
+  ACAV100M_sample: 1024
+  fma: 256
+  audioset_16k: 256
+  positive: 256
+  adversarial_negative: 256
+
+# Overwritten by the trainer from the median generated clip length; a placeholder keeps the key present.
+total_length: 32000
+
+# ---------------------------------------------------------------------------
+# Paths — set by the training notebook when it downloads the corpora
+# ---------------------------------------------------------------------------
+
+output_dir: ./hey_amy_training
+piper_sample_generator_path: ./piper-sample-generator
+
+# Precomputed embeddings of speech, music and general audio, used as negatives. These are the files
+# openWakeWord hosts; the notebook downloads them and sets these paths.
+feature_data_files:
+  ACAV100M_sample: ./openwakeword_features_ACAV100M_2000_hrs_16bit.npy
+  fma: ./openwakeword_features_fma.npy
+  audioset_16k: ./openwakeword_features_audioset_16k.npy
+
+false_positive_validation_data_path: ./validation_set_features.npy
+
+# Room impulse responses and background noise for augmentation.
+rir_paths:
+  - ./mit_rirs
+background_paths:
+  - ./audioset_16k
+  - ./fma_16k
+background_paths_duplication_rate:
+  - 1
+  - 1
+
+tts_batch_size: 50

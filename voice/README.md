@@ -104,16 +104,10 @@ The *trigger phrase* is a separate thing, and it is still `hey_jarvis`, because 
 trained neural model rather than a string to match. openWakeWord ships six: `alexa`, `hey_jarvis`,
 `hey_mycroft`, `hey_rhasspy`, `timer` and `weather`. None of them is "Amy".
 
-To actually say "Hey Amy", a model has to be trained on synthetic speech of that phrase. Two routes:
-
-- **openWakeWord's training notebook**, run on a free Colab GPU. Roughly an hour, mostly unattended,
-  and nothing is installed on your machine.
-- **Locally**, with `openwakeword.train`. It needs torch, torchinfo and torchmetrics — around 2 GB of
-  install, competing for the same memory the language model wants, on top of generating tens of
-  thousands of training clips.
-
-The notebook is the better trade. Either way the result is one `.onnx` file, and `wakeword_models`
-accepts a path, so nothing else changes:
+To actually say "Hey Amy", a model has to be trained on synthetic speech of that phrase. A complete
+training config and instructions are in [`training/`](training/README.md) — roughly an hour on a free
+Colab GPU, with nothing installed here. The result is one `.onnx` file, and `wakeword_models` accepts
+a path, so nothing else changes:
 
 ```sh
 dsh-voice --wake-word ~/.dsh/wake/hey_amy.onnx
