@@ -17,7 +17,7 @@ openWakeWord  ->  Silero VAD  ->  MLX Whisper  ->  classify  ->  ~/.dsh/input.so
 
 ```sh
 python3 -m venv ~/.dsh/voice-venv
-~/.dsh/voice-venv/bin/pip install -r voice/requirements.txt
+~/.dsh/voice-venv/bin/pip install -r ~/Documents/dsh-lite/voice/requirements.txt
 ```
 
 The openWakeWord models, including the Silero VAD the daemon uses for endpointing, are downloaded on
@@ -31,8 +31,17 @@ started from, not Python.
 Start dsh, type `/voice` to open the socket, then in another terminal:
 
 ```sh
-~/.dsh/voice-venv/bin/python voice/dsh_voice.py
+~/Documents/dsh-lite/voice/dsh-voice
 ```
+
+`dsh-voice` finds the virtual environment and the script relative to itself, so it works from any
+directory. Symlink it onto your PATH to shorten that:
+
+```sh
+ln -s ~/Documents/dsh-lite/voice/dsh-voice ~/.local/bin/dsh-voice
+```
+
+Then it is just `dsh-voice`. Options are passed straight through, for example `dsh-voice -v`.
 
 Say **"hey jarvis"**, then your instruction. The words land in the dsh input line without being
 submitted, so a misheard one can be seen and corrected. Say **"send it"** or **"go"** to run it, or

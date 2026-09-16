@@ -1,0 +1,15 @@
+#!/bin/sh
+# Launcher for the voice daemon, so it can be started from any directory.
+# The venv and the script are both found relative to this file's real location.
+here=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+venv="$HOME/.dsh/voice-venv/bin/python"
+
+if [ ! -x "$venv" ]; then
+  echo "No voice environment at $venv" >&2
+  echo "Create it with:" >&2
+  echo "  python3 -m venv ~/.dsh/voice-venv" >&2
+  echo "  ~/.dsh/voice-venv/bin/pip install -r $here/requirements.txt" >&2
+  exit 1
+fi
+
+exec "$venv" "$here/dsh_voice.py" "$@"
