@@ -29,52 +29,25 @@ receives it rather than as clean studio audio.
 
 ## Run it in Colab
 
-Open openWakeWord's training notebook straight from GitHub — nothing to download:
+Upload **`hey_amy_training.ipynb`** (in this directory) to [colab.research.google.com](https://colab.research.google.com),
+set *Runtime → Change runtime type → **T4 GPU***, and run the cells in order.
 
-**[colab.research.google.com/github/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb](https://colab.research.google.com/github/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb)**
+It is openWakeWord's `automatic_model_training.ipynb` cut down to this wake word: 18 cells instead of
+22, with the phrase already configured and the TensorFlow toolchain removed. That toolchain exists
+only to emit a `.tflite` next to the ONNX — the daemon loads ONNX — and its three pins
+(`tensorflow-cpu==2.8.1`, `tensorflow_probability==0.16.0`, `onnx_tf==1.10.0`) are from 2022 and are
+the likeliest thing in the original to fail to install today. The training script calls the tflite
+conversion unconditionally at the very end, after the ONNX is already written, so that last step
+fails harmlessly and the cell tolerates it.
 
-Set the runtime to a GPU (*Runtime → Change runtime type → T4*), then run the cells in order. The
-notebook installs the training dependencies, clones `piper-sample-generator`, and downloads the
-corpora onto Google's machines.
+The notebook pulls the phrase settings from `hey_amy.yaml` in this repository at run time, so editing
+that file changes the next training run without touching the notebook.
 
-The notebook does **not** take an uploaded config. It loads openWakeWord's own example and edits it
-in Python:
+Budget 45–60 minutes. Generating the speech is nearly all of it; training itself is minutes.
 
-```python
-config = yaml.load(open("openwakeword/examples/custom_model.yml", 'r').read(), yaml.Loader)
-config["target_phrase"] = ["hey sebastian"]
-```
-
-So the way to use `hey_amy.yaml` is to let the notebook own the paths, and take the phrase settings
-from it. **After that cell**, add one of your own:
-
-```python
-# Amy's phrase settings, over the notebook's downloaded paths.
-import yaml, urllib.request
-
-amy = yaml.safe_load(urllib.request.urlopen(
-    "https://raw.githubusercontent.com/shaunbeach/dsh-lite/main/voice/training/hey_amy.yaml"
-).read())
-
-for key in ("target_phrase", "model_name", "custom_negative_phrases", "n_samples", "n_samples_val"):
-    config[key] = amy[key]
-
-print(config["target_phrase"], config["model_name"],
-      len(config["custom_negative_phrases"]), "custom negatives")
-```
-
-Only those five keys. Everything else in the example config — `feature_data_files`,
-`batch_n_per_class`, and every path — describes what the notebook downloaded and where it put it, and
-overriding those is how a run dies after the generation step rather than before it. The remaining
-values in `hey_amy.yaml` (`layer_size`, `steps`, `max_negative_weight`,
-`target_false_positives_per_hour`) already match the example exactly, so there is nothing to change.
-
-Then run the rest of the notebook. Generation and augmentation are most of the wall clock; training
-itself is minutes.
-
-Colab is the right place for this. Locally it means torch, torchinfo, torchmetrics and `pronouncing`
-— about 2 GB of packages that are not needed to *run* the daemon — plus several GB of corpora, all
-competing for the 16 GB that the language model wants.
+Colab rather than locally: training wants torch, torchinfo, torchmetrics, speechbrain,
+audiomentations and `pronouncing` — about 2 GB that the daemon does not need to run — plus several GB
+of corpora, all competing for the 16 GB the language model wants.
 
 ## Using the result
 

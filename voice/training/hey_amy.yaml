@@ -42,9 +42,14 @@ custom_negative_phrases:
   - okay then
 
 # Synthetic clips of the target phrase, spoken by many Piper voices at three speaking rates.
-# Tens of thousands is the usual scale; the cost is generation time, not training time.
-n_samples: 30000
-n_samples_val: 2000
+#
+# Generation is the slow part of the whole exercise, and it is roughly linear: openWakeWord's own
+# notebook budgets about ten minutes on a T4 for its 3000 clips. This asks for 5000 positives plus
+# 1000 for validation plus 5000 adversarial negatives, so a little over half an hour. Raising it
+# improves the model and costs that much more waiting; the notebook's own demo value of 1000 trains
+# quickly and detects poorly.
+n_samples: 5000
+n_samples_val: 1000
 
 # Each clip is convolved with room impulse responses and mixed with background noise this many
 # times, so the model sees the phrase as a microphone across a room actually receives it.
