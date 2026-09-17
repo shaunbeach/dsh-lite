@@ -25,7 +25,10 @@ Zero Electron, zero React, zero browser dependencies. Instant startup (<40ms).
   - `temperature`, `top_p`, `top_k`, `min_p` and `presence_penalty` all reach a llama.cpp server.
     The DeepSeek cloud API is sent only the parameters it accepts.
 - **Essential Coding Tools**:
-  - `bash`: Shell execution in its own process group. Runs without approval, the way an agent should; Esc kills the command and everything it started. Output keeps the end and spills the full log to a file the model can read.
+  - `bash`: Shell execution in its own process group. Runs without approval, the way an agent should;
+    Esc kills the command and everything it started. Output keeps the end and spills the full log to
+    a file the model can read. Commands that would empty the working directory, reach outside it, or
+    discard uncommitted changes are refused — see **Destructive commands** below.
   - `view_file`: File reader with line numbers and slice ranges. Streams, so a window deep inside a
     large log costs that window rather than the file; binary files are reported, not dumped.
   - `edit_file`: Surgical search-and-replace with **colorized unified diffs** (`+` green, `-` red).
@@ -116,6 +119,20 @@ providers:
 ```
 
 ---
+
+## Destructive commands
+
+`bash` refuses a small set of commands outright: emptying the working directory (`rm -rf ./*`,
+`rm -rf .`), deleting anything outside it, `git reset --hard`, `git clean -fd`, and `dd`, `mkfs` or
+`shred`. Removing a build directory or a dependency tree is ordinary work and still runs.
+
+This is not a security boundary, and a shell cannot be given one by reading its text. It is there
+because the model is not an adversary — it is a small model acting on an instruction it may have
+misread, and "clear the workspace" is one plausible reading away from deleting every file in it. A
+refused command costs a retype; deleted work is gone.
+
+The system prompts say the same thing in words: "start over", "clear" and "reset" refer to the
+conversation, not the workspace.
 
 ## Voice control
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { ToolDefinition } from './types.js';
 import { runShellCommand } from './child-process.js';
 import { toolOutputLimitBytes } from './limits.js';
+import { judgeCommand, refusalMessage } from './destructive.js';
 
 interface BashArgs {
   command: string;
@@ -88,6 +89,11 @@ export const bashTool: ToolDefinition<BashArgs, string> = {
   execute: async ({ command, timeoutMs = DEFAULT_TIMEOUT_MS }, context) => {
     if (context.abortSignal?.aborted) {
       return 'Execution cancelled by user.';
+    }
+
+    const verdict = judgeCommand(command, context.cwd);
+    if (verdict.refused) {
+      return refusalMessage(verdict.reason!);
     }
 
     const limitBytes = context.outputLimitBytes ?? toolOutputLimitBytes(32768);

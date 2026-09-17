@@ -12,6 +12,7 @@ import { grepSearchTool } from '../src/tools/grep.js';
 import { listDirTool } from '../src/tools/glob.js';
 import { Agent, resolveMaxSteps } from '../src/agent.js';
 import { toolOutputLimitBytes } from '../src/tools/limits.js';
+import { judgeCommand, refusalMessage } from '../src/tools/destructive.js';
 import { renderDiff } from '../src/ui/diff.js';
 
 test('ToolRegistry executes essential coding tools', async (t) => {
@@ -288,4 +289,61 @@ test('view_file serves a window without loading the whole file', async (t) => {
   });
 
   await fs.rm(tmpDir, { recursive: true, force: true });
+});
+
+test('bash refuses to empty the workspace or reach outside it', async (t) => {
+  const cwd = '/Users/example/project';
+
+  await t.test('the shapes that destroy a workspace', () => {
+    for (const command of [
+      'rm -rf /Users/example/project/*',
+      'rm -rf ./*',
+      'rm -rf .',
+      'rm -rf ~',
+      'rm -rf /',
+      'rm -rf /Users/example',
+      'find . -delete',
+      'git reset --hard',
+      'git clean -fdx',
+      'dd if=/dev/zero of=/dev/disk0',
+      'npm test && rm -rf /Users/example/project/*',
+    ]) {
+      assert.strictEqual(judgeCommand(command, cwd).refused, true, `should refuse: ${command}`);
+    }
+  });
+
+  await t.test('ordinary work is untouched', () => {
+    for (const command of [
+      'rm -rf node_modules',
+      'rm -rf build/*',
+      'rm -f src/old.ts',
+      'rm -rf dist && npm run build',
+      'npm test',
+      'git status',
+      'git commit -m "wip"',
+      'python3 game.py',
+      'mkdir -p game/{css,js}',
+      'cat package.json',
+    ]) {
+      assert.strictEqual(judgeCommand(command, cwd).refused, false, `should allow: ${command}`);
+    }
+  });
+
+  await t.test('the refusal says what to do instead', () => {
+    const verdict = judgeCommand('rm -rf ./*', cwd);
+    const message = refusalMessage(verdict.reason!);
+    assert.match(message, /Name the specific files/);
+    assert.match(message, /\/clear/, 'the model should be pointed at the command that was meant');
+  });
+
+  await t.test('a refused command does not run', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-guard-'));
+    await fs.writeFile(path.join(tmpDir, 'keep.txt'), 'still here\n');
+
+    const result = await bashTool.execute({ command: 'rm -rf ./*' }, { cwd: tmpDir });
+    assert.match(result, /Refused/);
+    assert.strictEqual(await fs.readFile(path.join(tmpDir, 'keep.txt'), 'utf8'), 'still here\n');
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
 });

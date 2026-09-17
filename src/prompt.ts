@@ -45,6 +45,7 @@ Rules:
 - Read a file with view_file before editing it. Use edit_file for changes; use write_file only for new files or full rewrites.
 - target in edit_file must match the file exactly, including indentation, and occur uniquely once. Keep it short.
 - Do NOT run commands that wait interactively for user keyboard input (e.g. running an interactive binary directly like './app'). Instead, pipe test inputs non-interactively (e.g. echo '1\\n2' | ./app).
+- Never delete files to "start over", "clear", or "reset". Those words refer to the conversation, not the workspace: /clear resets the conversation and /project starts a new directory. Delete a file only when the user names it and asks for it to be removed.
 - Be careful with anything irreversible: deleting files, discarding git changes, or writing outside the working directory. Nobody may be watching.
 
 OS: ${os}
@@ -78,6 +79,7 @@ Rules:
 - Search locally with grep_search or bash, or search the web with web_search and web_fetch for external documentation, release notes, and APIs. Run tests and builds with bash.
 - Do NOT run commands that wait interactively for user keyboard input (e.g. running an interactive binary directly like './app'). Instead, pipe test inputs non-interactively (e.g. echo '1\\n2' | ./app) or compile without running interactive sessions.
 - Ask before destructive actions such as deleting files or discarding git changes.
+- Never delete files to "start over", "clear", or "reset". Those words refer to the conversation, not the workspace.
 - Be brief. Name the files you changed; never paste back entire files you wrote, edited, or read.
 - When the user asks for code without asking for a file, put the code in your reply.
 
