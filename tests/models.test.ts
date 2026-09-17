@@ -9,6 +9,7 @@ import { ContextManager, elideToolResultContent, estimateMessageTokens } from '.
 import { findFatalOutput, LlamaServerManager, sameLaunch, serverOrigin } from '../src/llm/server.js';
 import type { ChatMessage } from '../src/llm/types.js';
 import { DEFAULT_SAMPLING, DeepSeekClient } from '../src/llm/client.js';
+import { COMMANDS, parseCommand } from '../src/tui/commands.js';
 import { Agent } from '../src/agent.js';
 
 test('Models config and local llama.cpp infrastructure', async (t) => {
@@ -807,4 +808,10 @@ test('Server output classification', async (t) => {
     assert.match(findFatalOutput('E llama_decode: failed to decode, ret = -3')!, /forward pass/);
     assert.match(findFatalOutput('error loading model architecture')!, /could not be loaded/);
   });
+});
+
+test('/project parses as a command with its name', () => {
+  assert.deepStrictEqual(parseCommand('/project galaga-clone'), { name: 'project', args: 'galaga-clone' });
+  assert.deepStrictEqual(parseCommand('/project'), { name: 'project', args: '' });
+  assert.ok(COMMANDS.some((c) => c.name === 'project'), 'it must be listed for completion');
 });

@@ -27,6 +27,8 @@ import {
 } from './components.js';
 import { COMMANDS, type CommandName, parseCommand, slashCommands } from './commands.js';
 import { summariseForSpeech, VoiceSocket } from '../voice/socket.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 export interface InteractiveAppOptions {
   agent: Agent;
@@ -413,6 +415,10 @@ export class InteractiveApp {
         void this.changeDirectory(args);
         break;
 
+      case 'project':
+        void this.createProject(args);
+        break;
+
       case 'model':
         if (args) void this.switchModel(args);
         else this.pickModel();
@@ -452,6 +458,7 @@ export class InteractiveApp {
         this.chat.addChild(this.bannerView);
         this.agent.clearHistory();
         this.updateFooter();
+        this.announce('Workspace cleared.');
         break;
 
       case 'resume':
@@ -462,6 +469,75 @@ export class InteractiveApp {
         this.tui.stop();
         this.finishPromiseResolve();
         break;
+    }
+  }
+
+  /**
+   * Tells a listening voice daemon how a command turned out.
+   *
+   * Only turns report themselves, through the agent loop. A command produces no assistant reply to
+   * summarise, so without this a spoken "clear the workspace" would be carried out in silence.
+   */
+  private announce(summary: string): void {
+    this.voiceSocket?.broadcast({ type: 'done', summary });
+  }
+
+  /**
+   * Creates a directory, moves into it, and starts a fresh conversation.
+   *
+   * One command rather than three, because it is one intent: the point of starting a project is to
+   * be working in it with nothing carried over. Doing it in pieces leaves half-states when a step
+   * fails, and "start a new project" is a single thing to say.
+   */
+  private async createProject(name: string) {
+    if (this.isBusy || this.isServing || this.isSwitchingModel) {
+      this.setStatus('Busy — wait for the current operation to finish.');
+      return;
+    }
+
+    const folder = name.trim();
+    if (!folder) {
+      this.setStatus('Usage: /project <name>');
+      return;
+    }
+    // One directory inside the workspace, not a path: a spoken name should never be able to reach
+    // up and out of where the work is happening.
+    if (folder.includes('/') || folder.includes('\\') || folder.startsWith('.')) {
+      const problem = `A project name cannot contain a path: ${folder}`;
+      this.setStatus(problem);
+      this.announce(problem);
+      return;
+    }
+
+    const target = path.resolve(this.agent.cwd, folder);
+    try {
+      if (fs.existsSync(target)) {
+        const problem = `${folder} already exists`;
+        this.setStatus(problem);
+        this.announce(`${problem}. Nothing was created.`);
+        return;
+      }
+      fs.mkdirSync(target, { recursive: true });
+
+      // Cleared before the move, so the empty conversation is what follows into the new workspace.
+      this.agent.clearHistory();
+      await this.agent.setCwd(target);
+
+      this.bannerView.setCwd(target);
+      this.editor.setAutocompleteProvider(
+        new CombinedAutocompleteProvider(slashCommands(this.modelsConfig?.models ?? []) as any, target)
+      );
+      this.chat.clear();
+      this.chat.addChild(this.bannerView);
+      this.chat.addChild(new NoticeView(`New project in ${target}`));
+      this.setStatus(undefined);
+      this.updateFooter();
+      this.tui.requestRender();
+      this.announce(`Project ready. We are in ${folder}.`);
+    } catch (err: any) {
+      const problem = `Could not create ${folder}: ${err.message}`;
+      this.setStatus(problem);
+      this.announce(problem);
     }
   }
 
@@ -499,6 +575,7 @@ export class InteractiveApp {
 
     this.updateFooter();
     this.tui.requestRender();
+    if (mode !== 'voice') this.announce(`${mode} mode.`);
   }
 
   private async closeVoiceSocket(): Promise<void> {
@@ -559,8 +636,10 @@ export class InteractiveApp {
       this.setStatus(undefined);
       this.updateFooter();
       this.tui.requestRender();
+      this.announce(`Now in ${path.basename(moved)}.`);
     } catch (err: any) {
       this.setStatus(`Could not change directory: ${err.message}`);
+      this.announce(`Could not change directory: ${err.message}`);
     }
   }
 
@@ -635,6 +714,12 @@ export class InteractiveApp {
       (m) => m.name.toLowerCase() === name.toLowerCase() || m.name.toLowerCase().includes(name.toLowerCase())
     );
 
+    if (!matched && !(name.startsWith('deepseek-') || name === 'cloud')) {
+      this.setStatus(`No model matching "${name}"`);
+      this.announce(`I could not find a model called ${name}.`);
+      return;
+    }
+
     if (matched) {
       this.agent.setModel(matched);
       this.agent.lastTurnMetrics = undefined;
@@ -647,13 +732,16 @@ export class InteractiveApp {
       try {
         await this.serverManager.ensure(matched, (msg) => this.setStatus(msg), this.modelSwitchAbort.signal);
         this.setStatus(undefined);
+        this.announce(`${matched.name} is loaded.`);
       } catch (err: any) {
         if (this.modelSwitchAbort.signal.aborted) {
           this.chat.addChild(new NoticeView(`Model load cancelled; ${matched.name} is not running.`));
           this.setStatus(undefined);
+          this.announce('Model load cancelled.');
         } else {
           this.chat.addChild(new NoticeView(`Failed to start server for ${matched.name}: ${err.message}`));
           this.setStatus(undefined);
+          this.announce(`Could not load ${matched.name}.`);
         }
       } finally {
         this.isSwitchingModel = false;
@@ -672,6 +760,7 @@ export class InteractiveApp {
       this.agent.client.configureModel({ model: modelName, extendedSampling: false });
       this.bannerView.setModel(modelName, this.agent.client.mode);
       this.updateFooter();
+      this.announce(`${modelName} is selected.`);
     }
   }
 
@@ -786,6 +875,7 @@ export class InteractiveApp {
     this.setStatus(undefined);
     this.updateFooter();
     this.tui.requestRender();
+    this.announce('Server stopped.');
   }
 
   private openPicker(title: string, items: SelectItem[], onSelect: (value: string) => void) {

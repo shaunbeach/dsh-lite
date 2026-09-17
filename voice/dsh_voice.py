@@ -38,6 +38,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 # Whisper weights come from a local cache; the download bars for it are noise in a voice log.
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
@@ -55,6 +56,90 @@ DEFAULT_SOCKET = Path.home() / ".dsh" / "input.sock"
 #: Said alone, these end the turn rather than becoming part of it.
 ABORT_PHRASES = {"stop", "stop it", "cancel", "abort", "never mind", "nevermind", "quit that"}
 SUBMIT_PHRASES = {"send it", "send", "go", "go ahead", "do it", "run it", "submit", "okay go", "ok go"}
+
+@dataclass(frozen=True)
+class SpokenCommand:
+    """A phrase that drives the harness directly rather than reaching the model."""
+
+    pattern: re.Pattern
+    #: Harness command, with {name} filled from the phrase.
+    template: str
+    #: Question to ask first, or None to act at once. Only what cannot be undone asks.
+    confirm: Optional[str] = None
+    #: Turn the captured name into something that can be a directory.
+    slug: bool = False
+
+
+def _phrase(expr: str) -> re.Pattern:
+    return re.compile(expr, re.IGNORECASE)
+
+
+#: Matched against a whole utterance, never part of one, so "clear the workspace and write a test"
+#: stays an instruction. Destructive commands ask; the rest act and report.
+SPOKEN_COMMANDS = (
+    SpokenCommand(
+        _phrase(r"^(?:clear|reset)(?: the)?(?: workspace| chat| session| context| conversation)$"),
+        "/clear",
+        confirm="Do you want me to clear the workspace now?",
+    ),
+    SpokenCommand(
+        _phrase(r"^start(?: a)? new project$|^start fresh$"),
+        "/clear",
+        confirm="Do you want me to clear the workspace now?",
+    ),
+    SpokenCommand(
+        _phrase(r"^(?:start|create|make|set up)(?: a)? new project (?:named|called) (?P<name>.+)$"),
+        "/project {name}",
+        confirm="Do you want me to create a project called {name}?",
+        slug=True,
+    ),
+    SpokenCommand(
+        _phrase(r"^(?:change|switch)(?: the)? (?:directory|folder) to (?P<name>.+)$|^go to(?: the)? (?:directory|folder) (?P<name2>.+)$"),
+        "/cd {name}",
+        slug=True,
+    ),
+    SpokenCommand(
+        _phrase(r"^(?:switch|change)(?: the)? model to (?P<name>.+)$|^load(?: the)? (?P<name2>.+) model$"),
+        "/model {name}",
+    ),
+    SpokenCommand(
+        _phrase(r"^(?:disconnect|stop the server|unload the model|shut down the server)$"),
+        "/disconnect",
+    ),
+    SpokenCommand(_phrase(r"^(?:switch to )?agent mode$"), "/agent"),
+    SpokenCommand(_phrase(r"^(?:switch to )?plan mode$"), "/plan"),
+    SpokenCommand(_phrase(r"^(?:switch to )?chat mode$"), "/chat"),
+)
+
+
+def slugify(name: str) -> str:
+    """Turns a spoken name into a directory name: "Galaga Clone" becomes galaga-clone."""
+    cleaned = re.sub(r"[^\w\s-]", "", name).strip().lower()
+    return re.sub(r"[\s_]+", "-", cleaned)
+
+
+def match_command(text: str) -> Optional[tuple[SpokenCommand, str, Optional[str]]]:
+    """
+    Finds the command a whole utterance names, with its filled template and question.
+
+    Returns None for anything that is not one, which is most of what gets said.
+    """
+    spoken = _normalise(text)
+    for command in SPOKEN_COMMANDS:
+        found = command.pattern.match(spoken)
+        if not found:
+            continue
+        groups = found.groupdict()
+        name = groups.get("name") or groups.get("name2") or ""
+        if command.slug:
+            name = slugify(name)
+        if "{name}" in command.template and not name:
+            continue
+        filled = command.template.format(name=name)
+        question = command.confirm.format(name=name) if command.confirm else None
+        return command, filled, question
+    return None
+
 
 #: Answers to "shall I send that now?". Anything else is taken as more of the instruction, and
 #: silence is taken as no, so nothing is ever sent without having been agreed to.
@@ -337,7 +422,7 @@ class Listener:
             log(f"audio status: {status}")
         self.frames.put(indata[:, 0].copy())
 
-    def run(self, on_utterance, on_confirm) -> None:
+    def run(self, on_wake) -> None:
         import sounddevice as sd
 
         with sd.InputStream(
@@ -378,34 +463,9 @@ class Listener:
                     continue
 
                 log(f"wake ({score:.2f})")
-                self._converse(on_utterance, on_confirm)
+                on_wake(self._record)
                 self.wake.reset()
                 self.preroll.clear()
-
-    def _converse(self, on_utterance, on_confirm) -> None:
-        """
-        Handles one exchange: an instruction, then a question about whether to send it.
-
-        Asking is what makes voice safe to leave unattended. Transcription mishears, and the harness
-        acts without asking, so nothing is sent on a guess: a clear yes sends, a no or silence does
-        not, and the words stay in the input line either way to be corrected or sent by hand.
-        """
-        utterance = self._record(self.config.lead_in_ms)
-        if utterance is None:
-            return
-        if on_utterance(utterance) != "text" or not self.config.confirm:
-            return
-
-        for _ in range(self.config.confirm_rounds):
-            self.speaker.say(self.config.confirm_phrase)
-            # Recording waits out our own question, so the answer window starts when it ends.
-            reply = self._record(self.config.confirm_ms)
-            if reply is None:
-                log("no answer; leaving it unsent")
-                return
-            if on_confirm(reply) != "more":
-                return
-        log("asked enough; leaving it unsent")
 
     def _record(self, lead_in_ms: int) -> Utterance | None:
         """Records until the speaker stops, or gives up if they never start."""
@@ -616,54 +676,83 @@ def main(argv: list[str]) -> int:
             log("nothing transcribed")
         return text or None
 
-    def handle(utterance: Utterance) -> str:
-        # An acknowledgement only earns its place when nothing else will be said: with confirmation
-        # on, the question that follows a couple of seconds later says the same thing and more.
-        if not config.confirm:
-            speaker.say(config.ack_phrase)
+    def hear(record, timeout_ms: int) -> Optional[str]:
+        utterance = record(timeout_ms)
+        if utterance is None:
+            return None
+        text = transcriber.transcribe(utterance.audio)
+        if not text:
+            log("nothing transcribed")
+        return text or None
 
-        text = transcribe_or_none(utterance)
+    def agreed(record, question: str) -> bool:
+        """Asks, and takes anything short of a clear yes as no."""
+        speaker.say(question)
+        reply = hear(record, config.confirm_ms)
+        if reply is None:
+            log("no answer; leaving it")
+            return False
+        answer = classify_confirmation(reply)
+        log(f"answer ({answer}): {reply}")
+        return answer == "yes"
+
+    def converse(record) -> None:
+        text = hear(record, config.lead_in_ms)
         if text is None:
-            return "empty"
+            return
+
+        # A command drives the harness directly; the harness speaks the outcome when it is done.
+        found = match_command(text)
+        if found is not None:
+            _, filled, question = found
+            log(f"command: {filled}")
+            if question and not agreed(record, question):
+                speaker.say("Leaving it as it is.")
+                return
+            harness.send({"type": "text", "text": filled})
+            harness.send({"type": "submit"})
+            return
 
         intent = classify(text)
         log(f"{intent.action}{'+' + intent.then if intent.then else ''}: {intent.text or text}")
 
         if intent.action == "abort":
             harness.send({"type": "abort"})
-            return "abort"
+            return
         if intent.action == "submit":
             harness.send({"type": "submit"})
-            return "submit"
+            return
 
         harness.send({"type": "text", "text": intent.text})
         if intent.then == "submit":
             harness.send({"type": "submit"})
-            return "submit"
+            return
         if intent.then == "abort":
             harness.send({"type": "abort"})
-            return "abort"
-        return "text"
+            return
 
-    def confirm(utterance: Utterance) -> str:
-        """Answers the send question, or takes the reply as more of the instruction."""
-        text = transcribe_or_none(utterance)
-        if text is None:
-            return "no"
-
-        answer = classify_confirmation(text)
-        log(f"answer ({answer}): {text}")
-
-        if answer == "yes":
-            harness.send({"type": "submit"})
-        elif answer == "more":
-            # Not an answer, so it belongs to the instruction. The harness appends it, and the
-            # question comes round again for the longer version.
-            harness.send({"type": "text", "text": text})
-        return answer
+        # Dictation is read back on screen and needs agreeing to before it runs. Unlike a command,
+        # an answer that is neither yes nor no belongs to the instruction and extends it.
+        if not config.confirm:
+            return
+        for _ in range(config.confirm_rounds):
+            speaker.say(config.confirm_phrase)
+            reply = hear(record, config.confirm_ms)
+            if reply is None:
+                log("no answer; leaving it unsent")
+                return
+            answer = classify_confirmation(reply)
+            log(f"answer ({answer}): {reply}")
+            if answer == "yes":
+                harness.send({"type": "submit"})
+                return
+            if answer == "no":
+                return
+            harness.send({"type": "text", "text": reply})
+        log("asked enough; leaving it unsent")
 
     try:
-        listener.run(handle, confirm)
+        listener.run(converse)
     except KeyboardInterrupt:
         log("stopping")
     return 0

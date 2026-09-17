@@ -70,6 +70,34 @@ the file"* as dictation.
 
 **"stop"**, said on its own after the wake word, aborts a running turn. It is the Escape key.
 
+## Spoken commands
+
+Some phrases drive the harness directly instead of reaching the model. They are matched against the
+whole utterance, so *"clear the workspace and write me a test"* is still an instruction.
+
+| Say | Runs | |
+| --- | --- | --- |
+| "clear the workspace" / "start fresh" | `/clear` | asks first |
+| "start a new project named *X*" | `/project X` | asks first, reading the name back |
+| "change the directory to *X*" / "go to the folder *X*" | `/cd X` | at once |
+| "switch the model to *X*" / "load the *X* model" | `/model X` | at once |
+| "disconnect" / "stop the server" | `/disconnect` | at once |
+| "agent mode" / "plan mode" / "chat mode" | `/agent` etc. | at once |
+
+Only what cannot be undone asks. Clearing throws away the conversation and starting a project
+creates directories, so those are read back and need a yes; changing directory or model is a second
+away from being changed again, and waiting to confirm costs more than it protects.
+
+Each one is spoken back when it finishes — *"workspace cleared"*, *"now in src"*, *"project ready,
+we are in galaga-clone"* — and the harness sends the real outcome, so a directory that does not
+exist says so rather than reporting success.
+
+Project names are turned into directory names: *"Galaga Clone"* becomes `galaga-clone`, and the
+question says the slug back before anything is created.
+
+There is no undo for clearing. A conversation thrown away is gone, and the way back into a task is
+to say what you were doing: *"continue where we left off"* reaches the model like any instruction.
+
 `--no-confirm` sends dictation straight away, `--confirm-ms` changes the three seconds, and
 `--confirm-phrase` changes what she asks.
 
