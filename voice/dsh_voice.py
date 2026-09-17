@@ -85,15 +85,21 @@ def _phrase(expr: str) -> re.Pattern:
 #: Matched against a whole utterance, never part of one, so "clear the workspace and write a test"
 #: stays an instruction. Destructive commands ask; the rest act and report.
 SPOKEN_COMMANDS = (
+    # "chat" is the phrasing to use. "workspace" stays recognised so that saying it out of habit is
+    # still handled here rather than reaching the model, where it reads as an instruction about
+    # files rather than about the conversation.
     SpokenCommand(
-        _phrase(r"^(?:clear|reset)(?: the)?(?: workspace| chat| session| context| conversation)$"),
+        _phrase(
+            r"^(?:clear|reset|wipe)(?: the)?"
+            r"(?: chat| conversation| history| session| context| screen| workspace)$"
+        ),
         "/clear",
-        confirm="Do you want me to clear the workspace now?",
+        confirm="Do you want me to clear the chat now?",
     ),
     SpokenCommand(
-        _phrase(r"^start(?: a)? new project$|^start fresh$"),
+        _phrase(r"^start(?: a)? new project$|^start fresh$|^new chat$|^fresh start$"),
         "/clear",
-        confirm="Do you want me to clear the workspace now?",
+        confirm="Do you want me to clear the chat now?",
     ),
     SpokenCommand(
         _phrase(r"^(?:start|create|make|set up)(?: a)? new project (?:named|called) (?P<name>.+)$"),

@@ -458,7 +458,7 @@ export class InteractiveApp {
         this.chat.addChild(this.bannerView);
         this.agent.clearHistory();
         this.updateFooter();
-        this.announce('Workspace cleared.');
+        this.announce('Chat cleared.');
         break;
 
       case 'resume':

@@ -81,18 +81,22 @@ are therefore allowed in front of any command phrase, which is why that still wo
 
 | Say | Runs | |
 | --- | --- | --- |
-| "clear the workspace" / "start fresh" | `/clear` | asks first |
+| "clear the chat" / "start fresh" | `/clear` | asks first |
 | "start a new project named *X*" | `/project X` | asks first, reading the name back |
 | "change the directory to *X*" / "go to the folder *X*" | `/cd X` | at once |
 | "switch the model to *X*" / "load the *X* model" | `/model X` | at once |
 | "disconnect" / "stop the server" | `/disconnect` | at once |
 | "agent mode" / "plan mode" / "chat mode" | `/agent` etc. | at once |
 
+Say **"clear the chat"** rather than "clear the workspace". Both are recognised, but only one of
+them is safe to have misheard: a phrase that reaches the model instead of matching here is read as
+an instruction, and "clear the workspace" is one plausible reading away from deleting files.
+
 Only what cannot be undone asks. Clearing throws away the conversation and starting a project
 creates directories, so those are read back and need a yes; changing directory or model is a second
 away from being changed again, and waiting to confirm costs more than it protects.
 
-Each one is spoken back when it finishes — *"workspace cleared"*, *"now in src"*, *"project ready,
+Each one is spoken back when it finishes — *"chat cleared"*, *"now in src"*, *"project ready,
 we are in galaga-clone"* — and the harness sends the real outcome, so a directory that does not
 exist says so rather than reporting success.
 
