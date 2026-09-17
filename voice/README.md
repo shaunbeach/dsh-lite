@@ -75,6 +75,10 @@ the file"* as dictation.
 Some phrases drive the harness directly instead of reaching the model. They are matched against the
 whole utterance, so *"clear the workspace and write me a test"* is still an instruction.
 
+Detection fires partway through the wake word, so the rest of it lands at the start of the recording:
+*"hey amy, start a new project"* transcribes as *"me. Start a new project"*. A couple of short words
+are therefore allowed in front of any command phrase, which is why that still works.
+
 | Say | Runs | |
 | --- | --- | --- |
 | "clear the workspace" / "start fresh" | `/clear` | asks first |

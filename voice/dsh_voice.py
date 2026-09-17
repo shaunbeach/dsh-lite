@@ -70,8 +70,16 @@ class SpokenCommand:
     slug: bool = False
 
 
+#: Wake-word detection fires partway through the phrase, so the rest of it lands at the start of the
+#: recording: "hey amy, start a new project" transcribes as "me. Start a new project". Rather than
+#: guess how a name will be misheard, a couple of short leading words are allowed before any command.
+WAKE_REMNANT = r"(?:[\w']{1,6}[\s,.]+){0,2}"
+
+
 def _phrase(expr: str) -> re.Pattern:
-    return re.compile(expr, re.IGNORECASE)
+    # Every branch of an alternation gets the same tolerance, and the anchors stay: a command must
+    # still be the whole utterance, remnant aside.
+    return re.compile(expr.replace("^", "^" + WAKE_REMNANT), re.IGNORECASE)
 
 
 #: Matched against a whole utterance, never part of one, so "clear the workspace and write a test"
@@ -167,8 +175,9 @@ class Config:
     lead_in_ms: int = 3_000
     #: Hard ceiling on one utterance, so a stuck microphone cannot record forever.
     max_utterance_ms: int = 20_000
-    #: Audio kept from before the wake word fired, for speech that runs straight on from it.
-    preroll_ms: int = 300
+    #: Audio kept from before the wake word fired. The instruction comes after the wake word, so
+    #: this only captures the wake word itself; anything above zero feeds it into the transcription.
+    preroll_ms: int = 0
     #: Whether to ask before sending dictated text.
     confirm: bool = True
     confirm_phrase: str = "Shall I send that now?"
