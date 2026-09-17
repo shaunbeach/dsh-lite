@@ -75,9 +75,16 @@ the file"* as dictation.
 Some phrases drive the harness directly instead of reaching the model. They are matched against the
 whole utterance, so *"clear the workspace and write me a test"* is still an instruction.
 
-Detection fires partway through the wake word, so the rest of it lands at the start of the recording:
-*"hey amy, start a new project"* transcribes as *"me. Start a new project"*. A couple of short words
-are therefore allowed in front of any command phrase, which is why that still works.
+An utterance is reduced before it is matched, because what reaches the transcript is rarely the bare
+phrase. Filler is stripped from both ends — *"hey amy could you clear the chat please"* is the same
+request as *"clear the chat"* — and that includes the wake word's own tail, which lands at the front
+because detection fires partway through it rather than after. Words that are nearly a command word
+are snapped to it, so *"clear the chap"* is understood.
+
+Two things stop that becoming over-eager. A negation anywhere in front disqualifies the phrase, so
+*"don't clear the chat"* is not a request to clear it. And an utterance opening with a question word
+is a question about the command rather than a request for it: *"is it ok to clear the chat"* and
+*"how do I clear the chat"* both reach the model, while *"could you clear the chat"* does not.
 
 | Say | Runs | |
 | --- | --- | --- |

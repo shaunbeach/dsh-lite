@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import difflib
 import gc
 import json
 import os
@@ -70,16 +71,80 @@ class SpokenCommand:
     slug: bool = False
 
 
-#: Wake-word detection fires partway through the phrase, so the rest of it lands at the start of the
-#: recording: "hey amy, start a new project" transcribes as "me. Start a new project". Rather than
-#: guess how a name will be misheard, a couple of short leading words are allowed before any command.
-WAKE_REMNANT = r"(?:[\w']{1,6}[\s,.]+){0,2}"
+#: Words that can sit on either end of a command without changing what it asks for. The wake word's
+#: own tail lands here too: detection fires partway through "hey amy", so the rest of it is recorded.
+EDGE_FILLER = frozenset(
+    """hey hi ok okay um uh so well now please thanks thank you could would can will
+    just kindly for me my amy aimee amie emmy me a the i want need lets let us and then right""".split()
+)
+
+#: If one of these precedes the phrase, it is being talked about rather than asked for.
+NEGATIONS = frozenset("dont do not never dont't no instead without rather than avoid".split())
+
+#: An utterance opening with one of these is a question about a command, not a request to run it:
+#: "is it ok to clear the chat" asks, where "could you clear the chat" asks for it to happen.
+QUESTION_OPENERS = frozenset(
+    "is are was were am should shall what why how when where which does did has have had".split()
+)
+
+#: The fixed words commands are built from. A token close to one of these is treated as that word,
+#: which is how "clear the chap" survives being misheard.
+COMMAND_VOCABULARY = frozenset(
+    """clear reset wipe chat conversation history session context screen workspace start fresh
+    new project named called change switch directory folder model load disconnect server stop
+    agent plan mode go set up""".split()
+)
+
+#: Tokens beyond this are a name being dictated, not a command word, and are left alone.
+SNAP_WINDOW = 5
+
+
+def _snap(token: str) -> str:
+    """Corrects a token that is nearly a command word. Short tokens are left alone as too ambiguous."""
+    if len(token) < 4 or token in COMMAND_VOCABULARY:
+        return token
+    close = difflib.get_close_matches(token, COMMAND_VOCABULARY, n=1, cutoff=0.75)
+    return close[0] if close else token
+
+
+def canonicalise(text: str) -> tuple[str, bool]:
+    """
+    Reduces an utterance to the command it is asking for, if it is asking for one.
+
+    Filler is stripped from both ends, near-miss words are snapped to the command vocabulary, and a
+    negation anywhere in the stripped prefix disqualifies the whole thing: "don't clear the chat" is
+    about a command rather than a request for one.
+
+    Returns the reduced text and whether a negation was found.
+    """
+    tokens = _normalise(text).split()
+    if tokens and tokens[0] in QUESTION_OPENERS:
+        return "", True
+
+    def is_filler(token: str) -> bool:
+        if token in COMMAND_VOCABULARY:
+            return False
+        # A one or two letter token at the edge is a fragment of the wake word rather than a word:
+        # "hey amy" is heard as "me.", "y.", "e." depending on where detection fired.
+        return token in EDGE_FILLER or len(token) <= 2
+
+    lead = 0
+    while lead < len(tokens) and is_filler(tokens[lead]):
+        lead += 1
+    negated = any(t in NEGATIONS for t in tokens[:lead])
+
+    tail = len(tokens)
+    while tail > lead and is_filler(tokens[tail - 1]):
+        tail -= 1
+
+    core = tokens[lead:tail]
+    snapped = [_snap(t) if i < SNAP_WINDOW else t for i, t in enumerate(core)]
+    return " ".join(snapped), negated
 
 
 def _phrase(expr: str) -> re.Pattern:
-    # Every branch of an alternation gets the same tolerance, and the anchors stay: a command must
-    # still be the whole utterance, remnant aside.
-    return re.compile(expr.replace("^", "^" + WAKE_REMNANT), re.IGNORECASE)
+    # Anchored: a command is the whole utterance once filler has been stripped from its ends.
+    return re.compile(expr, re.IGNORECASE)
 
 
 #: Matched against a whole utterance, never part of one, so "clear the workspace and write a test"
@@ -94,17 +159,17 @@ SPOKEN_COMMANDS = (
             r"(?: chat| conversation| history| session| context| screen| workspace)$"
         ),
         "/clear",
-        confirm="Do you want me to clear the chat now?",
+        confirm="Would you like me to clear the chat now?",
     ),
     SpokenCommand(
         _phrase(r"^start(?: a)? new project$|^start fresh$|^new chat$|^fresh start$"),
         "/clear",
-        confirm="Do you want me to clear the chat now?",
+        confirm="Would you like me to clear the chat now?",
     ),
     SpokenCommand(
         _phrase(r"^(?:start|create|make|set up)(?: a)? new project (?:named|called) (?P<name>.+)$"),
         "/project {name}",
-        confirm="Do you want me to create a project called {name}?",
+        confirm="Would you like me to create a project called {name}?",
         slug=True,
     ),
     SpokenCommand(
@@ -138,7 +203,9 @@ def match_command(text: str) -> Optional[tuple[SpokenCommand, str, Optional[str]
 
     Returns None for anything that is not one, which is most of what gets said.
     """
-    spoken = _normalise(text)
+    spoken, negated = canonicalise(text)
+    if negated:
+        return None
     for command in SPOKEN_COMMANDS:
         found = command.pattern.match(spoken)
         if not found:

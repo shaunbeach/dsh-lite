@@ -347,3 +347,17 @@ test('bash refuses to empty the workspace or reach outside it', async (t) => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 });
+
+test('the session history is not something a command may delete', () => {
+  const cwd = '/Users/example/project';
+  for (const command of [
+    'rm -rf .dsh',
+    'rm -rf .dsh/sessions',
+    'rm -f .dsh/sessions/session-1.jsonl',
+    'rm -rf ./.dsh/sessions/*',
+  ]) {
+    assert.strictEqual(judgeCommand(command, cwd).refused, true, `should refuse: ${command}`);
+  }
+  // A directory that merely mentions it is fine.
+  assert.strictEqual(judgeCommand('rm -rf dsh-docs', cwd).refused, false);
+});

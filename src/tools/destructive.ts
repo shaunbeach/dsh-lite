@@ -64,6 +64,11 @@ function targetVerdict(rawTarget: string, cwd: string): DestructiveVerdict {
   if (!resolved.startsWith(cwd + path.sep)) {
     return { refused: true, reason: `${resolved} is outside the working directory` };
   }
+  // .dsh holds the session transcripts, which are the only record of what a turn did and the only
+  // way to recover something a turn wrote. "Clear the chat" read as an instruction lands here.
+  if (resolved.split(path.sep).includes('.dsh')) {
+    return { refused: true, reason: 'that would delete the session history in .dsh' };
+  }
   return { refused: false };
 }
 
