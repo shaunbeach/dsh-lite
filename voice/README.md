@@ -28,6 +28,9 @@ started from, not Python.
 
 ## Running
 
+Voice mode has the same tools as `/agent`: it can write files, run commands, and keep going until
+what you asked for works. The safeguard is that nothing is sent without your spoken "yes".
+
 Start dsh, type `/voice` to open the socket, then in another terminal:
 
 ```sh

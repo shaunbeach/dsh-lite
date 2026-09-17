@@ -69,17 +69,17 @@ export function resolveMaxSteps(option: number | undefined, envValue?: string): 
 }
 
 /**
- * Tools each restricted mode exposes, by name. Agent mode is absent because it gets everything
- * registered. Chat mode keeps the web tools: answering from training data alone would leave the
- * model unable to look anything up, and reading a page changes nothing in the workspace.
+ * Tools each restricted mode exposes, by name. Modes absent from this table get everything
+ * registered.
+ *
+ * Voice is absent deliberately. Spoken instructions are confirmed before they run — the daemon asks
+ * before sending, and nothing reaches the model without an explicit yes — so the check on a
+ * misheard command sits there rather than in a reduced tool set. A voice session that cannot run
+ * the thing it just wrote cannot finish the work it was asked to do.
  */
-const TOOLS_BY_MODE: Record<Exclude<InteractionMode, 'agent'>, readonly string[]> = {
+const TOOLS_BY_MODE: Record<'plan' | 'chat', readonly string[]> = {
   plan: ['view_file', 'list_dir', 'grep_search', 'web_search', 'web_fetch'],
   chat: ['web_search', 'web_fetch'],
-  // Voice deliberately has no bash: a shell cannot be made non-destructive by filtering commands,
-  // and a misheard instruction should not be able to delete anything. write_file is restricted to
-  // new files for the same reason, which leaves edit_file as the only way to change existing ones.
-  voice: ['view_file', 'list_dir', 'grep_search', 'web_search', 'web_fetch', 'write_file', 'edit_file'],
 };
 
 /** Stands in for a tool result the user aborted before the tool could run. */
@@ -289,7 +289,9 @@ export class Agent {
       const stepStartTime = Date.now();
 
       const allowed =
-        this.interactionMode === 'agent' ? undefined : TOOLS_BY_MODE[this.interactionMode];
+        this.interactionMode === 'plan' || this.interactionMode === 'chat'
+          ? TOOLS_BY_MODE[this.interactionMode]
+          : undefined;
       const tools = allowed
         ? this.registry.getOpenAITools().filter(t => allowed.includes(t.function.name))
         : this.registry.getOpenAITools();
@@ -426,7 +428,6 @@ export class Agent {
             cwd: this.cwd,
             abortSignal,
             outputLimitBytes: toolOutputLimitBytes(this.contextManager.contextWindow),
-            preventOverwrite: this.interactionMode === 'voice',
           }
         );
 

@@ -135,62 +135,54 @@ test('The voice socket drives the harness like a keyboard', async (t) => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-test('Voice mode cannot destroy anything', async (t) => {
+test('Voice mode can do the whole job', async (t) => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-voice-tools-'));
   const client = new DeepSeekClient();
   let offered: string[] = [];
   client.streamChat = async (_messages, tools) => {
     offered = tools.map((t) => t.function.name);
-    return { content: 'Saved it as notes.md.', reasoningContent: '', toolCalls: [] };
+    return { content: 'Built it and the tests pass.', reasoningContent: '', toolCalls: [] };
   };
 
   const agent = new Agent({ client, cwd: tmpDir });
   agent.sessionStore.appendMessage = async () => {};
   agent.setInteractionMode('voice');
-  await agent.runTurn('write me a template and save it as notes.md', {});
+  await agent.runTurn('write me a galaga clone and make sure it runs', {});
 
-  await t.test('no shell', () => {
-    assert.strictEqual(offered.includes('bash'), false, 'a shell cannot be made non-destructive by filtering');
+  await t.test('every tool agent mode has', () => {
+    const inAgentMode = new Agent({ client, cwd: tmpDir }).registry.getOpenAITools().map((t) => t.function.name);
+    assert.deepStrictEqual(offered.sort(), inAgentMode.sort(), 'voice must not be missing a tool agent has');
+    assert.ok(offered.includes('bash'), 'it cannot verify what it builds without a shell');
   });
 
-  await t.test('it can still read, search, write and edit', () => {
-    assert.deepStrictEqual(offered.sort(), [
-      'edit_file', 'grep_search', 'list_dir', 'view_file', 'web_fetch', 'web_search', 'write_file',
-    ]);
-  });
-
-  await t.test('write_file will not replace an existing file', async () => {
-    const existing = path.join(tmpDir, 'keep.md');
-    await fs.writeFile(existing, 'original content\n');
-
-    const refused = await writeFileTool.execute(
-      { path: 'keep.md', content: 'clobbered' },
-      { cwd: tmpDir, preventOverwrite: true }
+  await t.test('it can rewrite a file it already wrote', async () => {
+    const existing = path.join(tmpDir, 'game.py');
+    await fs.writeFile(existing, 'first attempt\n');
+    const result = await writeFileTool.execute(
+      { path: 'game.py', content: 'second attempt' },
+      { cwd: tmpDir }
     );
-    assert.match(refused, /already exists/);
-    assert.match(refused, /edit_file/, 'the model needs to be told what to do instead');
-    assert.strictEqual(await fs.readFile(existing, 'utf8'), 'original content\n', 'content was lost');
+    assert.match(result, /Successfully wrote/);
+    assert.strictEqual(await fs.readFile(existing, 'utf8'), 'second attempt');
   });
 
-  await t.test('it can still create a new file', async () => {
-    const created = await writeFileTool.execute(
-      { path: 'fresh.md', content: '# Fresh' },
-      { cwd: tmpDir, preventOverwrite: true }
-    );
-    assert.match(created, /Successfully wrote/);
-    assert.strictEqual(await fs.readFile(path.join(tmpDir, 'fresh.md'), 'utf8'), '# Fresh');
+  await t.test('the prompt tells it to finish rather than check in', () => {
+    const prompt = agent.messages[0].content!;
+    assert.match(prompt, /may have walked away/);
+    assert.match(prompt, /Run what you build/);
+    assert.match(prompt, /one or two short sentences/, 'replies are still spoken');
+    assert.match(prompt, /Never read code/, 'and must not be read aloud');
   });
 
-  await t.test('agent mode is unaffected', async () => {
-    agent.setInteractionMode('agent');
-    await agent.runTurn('run the tests', {});
-    assert.ok(offered.includes('bash'));
-  });
+  await t.test('plan and chat are still restricted', async () => {
+    agent.setInteractionMode('plan');
+    await agent.runTurn('how would you do it?', {});
+    assert.strictEqual(offered.includes('bash'), false);
+    assert.strictEqual(offered.includes('write_file'), false);
 
-  await t.test('the prompt tells the model its replies are spoken', () => {
-    agent.setInteractionMode('voice');
-    assert.match(agent.messages[0].content!, /read aloud/);
-    assert.match(agent.messages[0].content!, /one or two short sentences/);
+    agent.setInteractionMode('chat');
+    await agent.runTurn('hello', {});
+    assert.deepStrictEqual(offered.sort(), ['web_fetch', 'web_search']);
   });
 
   await fs.rm(tmpDir, { recursive: true, force: true });

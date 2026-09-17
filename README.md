@@ -40,9 +40,9 @@ Zero Electron, zero React, zero browser dependencies. Instant startup (<40ms).
   - Stores conversations under `.dsh/sessions/` with `--resume` and `/resume <id>` support.
   - Writes a `.gitignore` in `.dsh/` so transcripts never appear as untracked files in your repository.
 - **Interactive Slash Commands**:
-  - `/agent`, `/plan`, `/chat`, `/voice`: Switch interaction mode. Agent has every tool; plan has
-    the read-only ones; chat has web search and fetch, but nothing that touches the workspace;
-    voice can read, search, write new files and edit existing ones, but has no shell.
+  - `/agent`, `/plan`, `/chat`, `/voice`: Switch interaction mode. Agent and voice have every tool;
+    plan has the read-only ones; chat has web search and fetch, but nothing that touches the
+    workspace. Voice differs from agent only in how it answers: one or two spoken sentences.
   - `/voice`: Switch to voice mode and open the voice socket. See **Voice control** below.
   - `/cd <path>`: Move the workspace tools work in, without restarting the model or server. The
     conversation and its transcript follow you to the new directory.
@@ -120,9 +120,12 @@ providers:
 ## Voice control
 
 `/voice` opens a unix domain socket at `~/.dsh/input.sock` (owner-only, `0600`) and switches to a
-mode with no shell, where `write_file` refuses to replace an existing file. A shell cannot be made
-non-destructive by filtering commands, so voice mode simply has none; `edit_file` is the only way to
-change a file that already exists.
+mode with the same tools as `/agent`, so a spoken task can be carried out in full — written, run,
+and fixed until it works. What differs is the reply: one or two sentences, since it is read aloud.
+
+The check on a misheard instruction is the daemon asking before it sends, not a reduced tool set.
+Nothing reaches the model without an explicit "yes", and the words sit in the input line to be read
+first. A voice session that cannot run what it just wrote cannot finish the job it was given.
 
 The socket speaks newline-delimited JSON, so a separate daemon owns the microphone, wake word,
 endpointing and transcription, and the harness only ever sees text.
